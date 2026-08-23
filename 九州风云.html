@@ -3779,7 +3779,8 @@ function saveGame() {
       forceReloc: forceReloc, // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
       diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn), // 死亡地块记录（存档防丢失）
       humanElimShown: humanElimShown, // 人类全灭结算标志（防读档后重复弹窗）
-      diploUsed: diploUsed // 本回合已使用的外交机会（防读档后重复使用）
+      diploUsed: diploUsed, // 本回合已使用的外交机会（防读档后重复使用）
+      diplomacyMessages: diplomacyMessages // AI 外交消息记录（防读档后丢失）
     };
     // 存档 = 下载 JSON 文件（玩家自己保存）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); // 缩进 2 空格多行格式：史官记录/地块状态可直接查看与手动编辑
@@ -3857,6 +3858,7 @@ function applyLoadedSave(d) {
     goalWon = d.goalWon || {};
     humanElimShown = !!d.humanElimShown; // 恢复人类全灭结算标志（防读档后重复弹窗）
     diploUsed = d.diploUsed || {}; // 恢复本回合已使用的外交机会
+    diplomacyMessages = d.diplomacyMessages || []; // 恢复 AI 外交消息记录
     // 进入地图
     document.getElementById("pick").classList.add("hidden");
     document.getElementById("map-page").classList.remove("hidden");
