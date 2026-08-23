@@ -3525,7 +3525,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
   const surv = src.units.filter(u => attackers.indexOf(u) >= 0).length;
   // 演出：死亡动画 → 重绘 → 占领/总结（AI 回合等箭头播完再放结果动画）
   inputLock++;
-  if (deadUnits.length > 0 && b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
+  if (deadUnits.length > 0 && tgt.name) diedThisTurn.add(tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
   if (deadUnits.length > 0) SFX.dead();
   setTimeout(function() {
   for (const du of deadUnits) { const sp = spanOf(du.uid); if (sp) { sp.classList.add("dying"); deathAnim(du); } }
