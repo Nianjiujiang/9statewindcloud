@@ -3847,7 +3847,7 @@ function applyLoadedSave(d) {
     // 中原逐鹿：读档后重建地名标签（过滤禁用地块，防旧标签残留）
     container.querySelectorAll(".prov-label").forEach(function(l) { l.remove(); });
     createLabels(); updateLabelPositions();
-    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）20; enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false;
+    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）；enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false;
     mapView = d.mapView || "political";
     if (mapView === "economic") mapView = "income"; // 旧存档经济视图 → 收入视图（已拆分）
     unitUid = d.unitUid || 1;
