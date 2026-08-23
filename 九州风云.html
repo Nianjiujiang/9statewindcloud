@@ -780,6 +780,7 @@ html, body { height:100%; overscroll-behavior:none; }
   <div id="human-row" class="seat-row"></div>
   <div id="ai-row" class="seat-row"></div>
 </div>
+
 <div style="margin:6px 0;font-size:15px;color:#8b7355">总人数：<b id="total-p">0</b><span id="tp-min">（至少 2 人）</span></div>
 <div class="set-grid">
 <div class="set-row" id="row-neutral-cap"><label>中立军上限</label><div class="num"><button onclick="adjNeutral('cap',-1)">−</button><span class="val" id="nv-cap">3</span><button onclick="adjNeutral('cap',1)">+</button></div></div>
@@ -900,6 +901,32 @@ html, body { height:100%; overscroll-behavior:none; }
     <button class="sbtn" onclick="loadGame()">📂 读档</button>
     <input type="file" id="load-file" accept=".json" style="display:none" onchange="importSaveFile(this)">
   </div>
+  <div id="ai-modal" class="hidden" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:600;background:rgba(20,14,8,.98);border:2px solid rgba(255,215,0,.5);border-radius:12px;padding:16px 20px;width:min(780px,94vw);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">
+    <h3 style="color:#ffd700;margin:0 0 8px;letter-spacing:3px;text-align:center;font-size:18px;">📋 决策</h3>
+    <div style="font-size:13px;color:#b8a888;margin-bottom:6px;">把 AI 返回的决策粘贴到下方。支持 JSON 数组，也支持文本行：<code style="color:#ffd700">develop 两淮</code>、<code style="color:#ffd700">build_city 两淮</code>、<code style="color:#ffd700">recruit 步兵 两淮</code>、<code style="color:#ffd700">move 两淮 江南</code>、<code style="color:#ffd700">attack 两淮 江南</code>。</div>
+    <textarea id="ai-decision-input" style="width:100%;height:160px;box-sizing:border-box;background:#14100c;color:#f0e6d2;border:1px solid rgba(255,215,0,.35);border-radius:6px;padding:8px;font-family:monospace;font-size:12px;resize:vertical;"></textarea>
+    <div style="margin:10px 0;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="sbtn" onclick="parseAIDecision()">▶ 解析执行清单</button>
+      <button class="sbtn" onclick="copyAIChecklist()">📄 复制清单</button>
+      <button class="sbtn" onclick="document.getElementById('ai-decision-input').value='';document.getElementById('ai-decision-result').innerHTML='';">🧹 清空</button>
+    </div>
+    <div id="ai-decision-result" style="max-height:38vh;overflow-y:auto;font-size:13px;color:#e8dcc8;line-height:1.7;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:8px;"></div>
+    <div class="cm-btns" style="margin-top:12px;"><button class="sbtn" onclick="closeAIDecision()">关闭</button></div>
+  </div>
+  <div id="diplomacy-modal" class="hidden" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:610;background:rgba(20,14,8,.98);border:2px solid rgba(255,215,0,.5);border-radius:12px;padding:16px 20px;width:min(780px,94vw);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">
+    <h3 style="color:#ffd700;margin:0 0 8px;letter-spacing:3px;text-align:center;font-size:18px;">🕊 外交</h3>
+    <div style="font-size:13px;color:#b8a888;margin-bottom:6px;">回合开始可导出外交书给 AI；AI 必须明确写出发出者和接收者/回复者，不按当前轮到谁假设。每个语言模型每回合对每个玩家最多一次外交机会，导入后由史官自动记载。</div>
+    <div id="diplomacy-info" style="font-size:13px;color:#e8dcc8;margin-bottom:8px;"></div>
+    <div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="sbtn" onclick="exportDiplomacy()">📤 导出外交书</button>
+      <button class="sbtn" onclick="importDiplomacy()">📥 导入外交回复</button>
+      <button class="sbtn" onclick="document.getElementById('diplomacy-input').value='';document.getElementById('diplomacy-result').innerHTML='';">🧹 清空</button>
+    </div>
+    <textarea id="diplomacy-input" style="width:100%;height:130px;box-sizing:border-box;background:#14100c;color:#f0e6d2;border:1px solid rgba(255,215,0,.35);border-radius:6px;padding:8px;font-family:monospace;font-size:12px;resize:vertical;" placeholder="粘贴 AI 返回的外交 JSON 或文本"></textarea>
+    <div id="diplomacy-result" style="max-height:30vh;overflow-y:auto;font-size:13px;color:#e8dcc8;line-height:1.7;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:8px;margin-top:8px;"></div>
+    <div class="cm-btns" style="margin-top:12px;"><button class="sbtn" onclick="closeDiplomacy()">关闭</button></div>
+  </div>
+
   <div id="gameover-modal" class="hidden">
     <h3 id="go-title">🏆 游戏结束</h3>
     <div id="go-rank"></div>
@@ -922,6 +949,13 @@ html, body { height:100%; overscroll-behavior:none; }
   </div>
   <div id="turn-timer" class="hidden ui-sc"></div>
   <div id="turn-label" class="hidden ui-sc">第 1 回合</div>
+  <div id="btn-ai-row" style="position:fixed;bottom:24px;right:120px;display:none;gap:6px;z-index:400;align-items:center;">
+    <button class="sbtn" id="btn-ai-rulebook" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIRulebook()" title="导出一次即可的完整规则书">规则书</button>
+    <button class="sbtn" id="btn-ai-turn" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIPack()" title="导出当前回合状态">回合</button>
+    <button class="sbtn" id="btn-ai-decision" style="width:auto;padding:6px 8px;font-size:12px" onclick="openAIDecision()" title="粘贴 AI 返回的决策，生成人工执行清单">决策</button>
+    <button class="sbtn" id="btn-ai-diplomacy" style="width:auto;padding:6px 8px;font-size:12px" onclick="openDiplomacy()" title="回合开始导出外交情况，AI 选择发消息/回话，导入后史官自动记载">外交</button>
+  </div>
+
   <div id="turn-box" class="hidden ui-s">
     <button id="turn-btn" onclick="turnClick()">⏳</button>
   </div>
@@ -2490,6 +2524,7 @@ function goAction() {
 function nextTurn() {
   if (gamePhase !== "action") return;
   currentTurn++;
+  diploUsed = {}; // 新回合重置外交机会
   // 新回合开始：R2 起结算收入入国库 + 中立地块刷兵
   if (currentTurn >= 2) {
     const tr = calcTransfers();
@@ -3811,6 +3846,7 @@ function applyLoadedSave(d) {
     document.getElementById("players").classList.remove("hidden");
     document.getElementById("view-box").classList.remove("hidden");
     document.getElementById("save-box").classList.remove("hidden");
+    if (typeof updateAILLMUI === "function") updateAILLMUI();
     collapsePlayersOnMobile();
     // 清理上一次游戏结束的结算残留（go-mask 遮罩/结算面板/回合计时器）——否则读档后旧结算画面挡住地图
     const gm = document.getElementById("go-mask"); if (gm) gm.remove();
@@ -4467,6 +4503,11 @@ function _oneUnit(spec) {
 function parseReplayText(raw) {
   const lines = String(raw).split(/\r?\n/);
   _st = {}; _pl = {}; _atkPending = null; _lastWinner = null; _pending = null; // 战斗结果暂存（损失行/旧文件兜底） // 最后胜利者（顺势占领时进驻目标）
+  // 读史解析：先把全部陆地省份作为中立地块纳入状态，确保中立之间边界按浅色绘制
+  for (const _p0 of DATA) {
+    if (!_p0.is_land) continue;
+    _st[_p0.id] = { owner: null, city: 0, dev: _p0.dev || 0, building: "", units: [] };
+  }
   const frames = [];
   let turn = 1, phase = "build", evBuf = [], pendingSummary = false; // 同回合连续概况合并成一帧
   // displayName 反查（进化名 → 原始势力 key）
@@ -4653,7 +4694,17 @@ function parseReplayText(raw) {
     if (m) { var _fc = revName[m[1]] || m[1]; _replayCaps[_fc] = m[2]; pushFrame(); continue; }
     // 灭亡（支持进化名反查）
     m = line.match(/^(.+?) 灭亡了！$/);
-    if (m) { var _fn = revName[m[1]] || m[1]; if (_pl[_fn]) _pl[_fn].e = true; pushFrame(); continue; }
+    if (m) {
+      var _fn = revName[m[1]] || m[1];
+      if (_pl[_fn]) _pl[_fn].e = true;
+      for (var _dp2 in _st) {
+        if (_st[_dp2] && _st[_dp2].owner === _fn) {
+          _st[_dp2].owner = null;
+          _st[_dp2].units = [];
+        }
+      }
+      pushFrame(); continue;
+    }
     // 其他行（文件头/迁都/开战/条约等）：仅记录文本，不产生状态帧
   }
   if (pendingSummary) { pushFrame(); pendingSummary = false; } // 收尾：最后一组概况
@@ -8493,6 +8544,7 @@ function showMap(){
   document.getElementById("players").classList.remove("hidden");
   document.getElementById("view-box").classList.remove("hidden");
   document.getElementById("save-box").classList.remove("hidden");
+  if (typeof updateAILLMUI === "function") updateAILLMUI();
   collapsePlayersOnMobile();
   document.getElementById("turn-timer").classList.remove("hidden");
   document.getElementById("turn-label").classList.remove("hidden");
@@ -9112,7 +9164,7 @@ function startPick(){
   const smx = scenarioMax();
   if (pickOrder.length > smx) { return; }
   pickOrder=[];
-  for(var i=0;i<12;i++){if(seatTypes[i])pickOrder.push({name:(seatTypes[i]==="human"?"玩家"+(i+1)+"：人类":"玩家"+(i+1)+"：电脑"),type:seatTypes[i]})}
+  for(var i=0;i<12;i++){if(seatTypes[i]){var nm=seatTypes[i]==="human"?"玩家"+(i+1)+"：人类":"玩家"+(i+1)+"：电脑";pickOrder.push({name:nm,type:seatTypes[i]})}}
   document.getElementById("setup").classList.add("hidden");document.getElementById("pick").classList.remove("hidden");
   currentPick=0;picks={};avail=new Set(SCENARIOS[scenarioId].factions || ORDER);if (centralPlains) { avail.delete("契丹"); avail.delete("女真"); avail.delete("蒙古"); avail.delete("党项"); } updatePickUI();buildPickBar();showPick(); // 中原逐鹿：禁用游牧四文明
 }
@@ -9256,6 +9308,645 @@ document.addEventListener("keydown", function(e) {
 document.addEventListener("keyup", function(e) {
   keysHeld3D[e.key] = false;
 });
+// ===== AI 语言模型（LLM）辅助：导出决策包 / 导入决策清单 =====
+function aiDownloadText(filename, text, mime) {
+  const blob = new Blob(["\ufeff" + text], { type: mime || "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+}
+
+// AI 模型辅助开关：在设置界面按空格启动/关闭，启动后才显示 AI LLM 相关按钮
+let aiLLMEnabled = false;
+function toggleAIModel() {
+  aiLLMEnabled = !aiLLMEnabled;
+  updateAILLMUI();
+  showToast(aiLLMEnabled ? "AI 模型辅助已启动" : "AI 模型辅助已关闭");
+}
+function updateAILLMUI() {
+  const mapPage = document.getElementById("map-page");
+  const inGame = mapPage && !mapPage.classList.contains("hidden");
+  const row = document.getElementById("btn-ai-row");
+  if (row) row.style.display = (aiLLMEnabled && inGame) ? "flex" : "none";
+  const ids = ["btn-ai-rulebook", "btn-ai-turn", "btn-ai-decision", "btn-ai-diplomacy"];
+  for (let i = 0; i < ids.length; i++) {
+    const el = document.getElementById(ids[i]);
+    if (el) el.style.display = aiLLMEnabled ? "" : "none";
+  }
+}
+document.addEventListener("keydown", function(e) {
+  if (e.code !== "Space" && e.key !== " ") return;
+  const setupEl = document.getElementById("setup");
+  if (!setupEl || setupEl.classList.contains("hidden")) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+  e.preventDefault();
+  if (!e.repeat) toggleAIModel();
+});
+updateAILLMUI();
+
+// ===== 外交系统：回合开始导出外交书，AI 发消息/回话，导入后写入史官 =====
+let diplomacyMessages = [];
+let diploUsed = {};
+
+function diploKey(me, target) { return me + "|" + target + "|" + currentTurn; }
+
+function diploPlayers() {
+  const out = [];
+  for (let i = 0; i < pickOrder.length; i++) {
+    const f = picks[i];
+    if (!f || eliminated[f]) continue;
+    out.push({
+      f: f,
+      name: displayName(f),
+      raw: f,
+      seat: pickOrder[i] ? pickOrder[i].name : "",
+      type: pickOrder[i] ? pickOrder[i].type : ""
+    });
+  }
+  return out;
+}
+
+function diploIncoming() {
+  return diplomacyMessages.slice();
+}
+
+function diploUsedEntries() {
+  const used = [];
+  for (const k in diploUsed) {
+    const parts = k.split("|");
+    if (String(parts[2]) === String(currentTurn)) used.push({ from: parts[0], to: parts[1] });
+  }
+  return used;
+}
+
+function diploResolveFaction(name) {
+  if (!name) return null;
+  for (const f in C) {
+    if (f === name || displayName(f) === name) return f;
+  }
+  return null;
+}
+
+function updateDiplomacyInfo() {
+  const el = document.getElementById("diplomacy-info");
+  if (!el) return;
+  const players = diploPlayers();
+  const used = diploUsedEntries();
+  const msgs = diploIncoming();
+  let h = "当前回合：第 " + currentTurn + " 回合";
+  h += "<br>可参与外交玩家：" + (players.length ? players.map(function(p) { return p.name; }).join("、") : "无");
+  h += "<br>外交消息记录：" + (msgs.length ? msgs.map(function(m) { return "第" + m.turn + "回合 " + displayName(m.from) + " → " + displayName(m.to) + "：" + m.content; }).join("；") : "无");
+  h += "<br>已用外交机会：" + (used.length ? used.map(function(u) { return displayName(u.from) + "→" + displayName(u.to); }).join("、") : "无");
+  el.innerHTML = h;
+}
+
+function openDiplomacy() {
+  const el = document.getElementById("diplomacy-modal");
+  if (el) el.classList.remove("hidden");
+  updateDiplomacyInfo();
+}
+
+function closeDiplomacy() {
+  const el = document.getElementById("diplomacy-modal");
+  if (el) el.classList.add("hidden");
+}
+
+function exportDiplomacy() {
+  let md = "# 九州风云 · AI 外交书\n\n";
+  md += "第 " + currentTurn + " 回合（回合开始）\n\n";
+  const players = diploPlayers();
+  md += "## 可参与外交的玩家\n";
+  if (!players.length) md += "暂无\n";
+  for (const p of players) {
+    const typeTxt = p.type === "computer" ? "电脑AI" : "人类玩家";
+    md += "- " + p.name + "（" + p.seat + "，" + typeTxt + "）\n";
+  }
+  const messages = diploIncoming();
+  md += "\n## 外交消息记录（回合开始前已有）\n";
+  if (!messages.length) md += "暂无\n";
+  for (const m of messages) md += "- 第" + m.turn + "回合：" + displayName(m.from) + " → " + displayName(m.to) + "：" + m.content + "\n";
+  const used = diploUsedEntries();
+  md += "\n## 本回合已使用外交机会\n";
+  md += used.length ? used.map(function(u) { return displayName(u.from) + "→" + displayName(u.to); }).join("、") : "无";
+  md += "\n\n## 请选择行动\n";
+  md += "请明确写出“发出者”和“接收者/回复者”，不要按当前轮到谁假设。\n";
+  md += "1. 主动发消息：{\"from\":\"发出者\",\"to\":\"接收者\",\"action\":\"send\",\"message\":\"内容\"}\n";
+  md += "2. 回复消息：{\"from\":\"回复者\",\"to\":\"被回复者\",\"action\":\"reply\",\"message\":\"内容\"}\n";
+  md += "每回合每个语言模型对每个玩家最多一次外交机会，严禁闲聊刷屏。\n";
+  md += "只返回 JSON（单对象或数组）。\n";
+  aiDownloadText("九州风云_外交书_第" + currentTurn + "回合.txt", md);
+  showToast("外交书已导出");
+}
+
+function diploParseLine(line) {
+  let s = line.trim();
+  s = s.replace(/^(?:建议|外交|行动|方案|回复计划)[:：]\s*/, "");
+  s = s.replace(/^第[一二三四五六七八九十\d]+[步条项]\s*[:：]?\s*/, "");
+  s = s.replace(/^\s*[-*\d.)、\s]+/, "").trim();
+  let m;
+  if ((m = s.match(/^(?:send|主动发消息|发消息|主动)\s*(\S+)\s*(?:to|给|对|->|→)?\s*(\S+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(?:reply|回复|回话)\s*(\S+)\s*(?:to|给|对|->|→)?\s*(\S+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(\S+)\s*(?:对|给)\s*(\S+)\s*(?:说|发消息)\s*[：:]?\s*(.*)/))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(\S+)\s*回复\s*(\S+)\s*[：:]?\s*(.*)/))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
+  return null;
+}
+
+function diploParseRaw(raw) {
+  if (!raw) return [];
+  let s = raw.replace(/```json/gi, "").replace(/```/g, "");
+  const a = s.indexOf("["), b = s.lastIndexOf("]");
+  if (a >= 0 && b > a) {
+    try {
+      const v = JSON.parse(s.slice(a, b + 1));
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === "object") return [v];
+    } catch (e) { /* fallthrough */ }
+  }
+  const oa = s.indexOf("{"), ob = s.lastIndexOf("}");
+  if (oa >= 0 && ob > oa) {
+    try {
+      const v = JSON.parse(s.slice(oa, ob + 1));
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === "object") return [v];
+    } catch (e) { /* fallthrough */ }
+  }
+  const out = [];
+  for (const line of raw.split(/\n/)) {
+    const d = diploParseLine(line);
+    if (d) out.push(d);
+  }
+  return out;
+}
+
+function importDiplomacy() {
+  const raw = document.getElementById("diplomacy-input").value || "";
+  const result = document.getElementById("diplomacy-result");
+  const actions = diploParseRaw(raw);
+  if (!actions.length) {
+    result.innerHTML = "<div style='color:#ff8a8a'>没有识别到外交内容。请粘贴 JSON 或文本，格式：秦 对 汉 说：... / 秦 回复 汉：...</div>";
+    return;
+  }
+  let html = "", ok = 0;
+  for (const a of actions) {
+    const fromRaw = (a.from || a.sender || a.发件人 || "").trim();
+    const toRaw = (a.to || a.target || a.receiver || a.收件人 || a.回复者 || "").trim();
+    const from = diploResolveFaction(fromRaw);
+    const to = diploResolveFaction(toRaw);
+    const action = String(a.action || a.type || "").toLowerCase() === "reply" ? "reply" : "send";
+    const content = String(a.message || a.content || a.text || a.reply || "").trim();
+    if (!from || !to || !content) { html += "<div>❌ 缺少发出者、接收者或内容：" + fromRaw + " → " + toRaw + "</div>"; continue; }
+    if (from === to || eliminated[from] || eliminated[to]) { html += "<div>❌ 无效外交对象：" + displayName(from) + " ↔ " + displayName(to) + "</div>"; continue; }
+    const key = diploKey(from, to);
+    if (diploUsed[key]) { html += "<div>❌ " + displayName(from) + " → " + displayName(to) + " 本回合已使用过外交机会</div>"; continue; }
+    diplomacyMessages.push({ turn: currentTurn, from: from, to: to, content: content, kind: action });
+    diploUsed[key] = true;
+    chronicleAdd(displayName(from) + (action === "reply" ? " 回复 " : " 对 ") + displayName(to) + (action === "reply" ? "：" : " 说：") + content);
+    html += "<div>✅ 已记载：" + displayName(from) + (action === "reply" ? " 回复 " : " 对 ") + displayName(to) + "：" + content + "</div>";
+    ok++;
+  }
+  result.innerHTML = (ok ? "<div style='color:#ffd700'>成功记载 " + ok + " 条外交。</div>" : "") + html;
+  updateDiplomacyInfo();
+  showToast("外交已写入史官");
+}
+
+
+
+function aiUnitSummaryText(s) {
+  if (!s || !s.units || !s.units.length) return "无";
+  const agg = {};
+  for (const u of s.units) agg[u.name] = (agg[u.name] || 0) + 1;
+  return Object.keys(agg).map(function(k) { return k + "×" + agg[k]; }).join("、");
+}
+
+function aiFactionTitle(f) {
+  return displayName(f) + (evolved[f] ? "（" + f + "→" + displayName(f) + "）" : "");
+}
+
+function aiStateData() {
+  const provinces = [];
+  for (const p of DATA) {
+    if (!p.is_land) continue;
+    const s = provState[p.id] || { units: [], city: 0, dev: (p.dev || 0), building: "" };
+    provinces.push({
+      id: p.id,
+      name: p.name,
+      terrain: p.terrain || "",
+      dev_default: p.dev || 0,
+      owner: s.owner || "",
+      city: s.city || 0,
+      dev: s.dev || 0,
+      building: s.building || "",
+      units: s.units ? s.units.map(function(u) { return { name: u.name, kind: u.kind, moves: u.moves, atk: u.atk }; }) : [],
+      income: Math.round(provIncome(p, s) * 100) / 100,
+      neighbors: (NEIGHBORS[p.name] || []).filter(function(n) { const np = provByName(n); return np && np.is_land; })
+    });
+  }
+  const factions = [];
+  for (let i = 0; i < pickOrder.length; i++) {
+    const f = picks[i];
+    if (!f || !playerState[f]) continue;
+    const cities = [];
+    let provinceCount = 0;
+    for (const p of DATA) {
+      const st = provState[p.id];
+      if (st && st.owner === f) {
+        provinceCount++;
+        if (st.city >= 1) cities.push(p.name + "Lv" + st.city);
+      }
+    }
+    factions.push({
+      seat: pickOrder[i] ? pickOrder[i].name : "",
+      type: pickOrder[i] ? pickOrder[i].type : "",
+      faction: f,
+      display: displayName(f),
+      capital: mutableCapital[f] || CAPITAL_MAP[f] || "",
+      treasury: Math.round((playerState[f].treasury || 0) * 100) / 100,
+      income: Math.round(calcIncome(f) * 100) / 100,
+      power: calcPower(f),
+      provinces: provinceCount,
+      cities: cities,
+      evolved: evolved[f] || "",
+      eliminated: !!eliminated[f]
+    });
+  }
+  return {
+    game: "九州风云",
+    scenarioId: scenarioId,
+    scenarioName: (SCENARIOS[scenarioId] && SCENARIOS[scenarioId].name) || scenarioId,
+    turn: currentTurn,
+    phase: gamePhase,
+    currentPlayerIndex: currentPlayerIdx,
+    currentFaction: picks[currentPlayerIdx] || "",
+    currentDisplay: picks[currentPlayerIdx] ? displayName(picks[currentPlayerIdx]) : "",
+    winCondition: winCond,
+    boardMode: boardMode,
+    terrainPenaltyEnabled: terrainOn,
+    enclavePenaltyEnabled: enclaveOn,
+    factions: factions,
+    provinces: provinces
+  };
+}
+
+function aiRulesDigest() {
+  return [
+    "【回合流程】每回合分“建造阶段”和“行动阶段”。所有玩家先轮流完成建造阶段，再轮流进入行动阶段。",
+    "【建造阶段】可执行：招募军队、建造/升级城市（最高4级）、提升发展度、建造本势力专属建筑、对他人进行资金支援。",
+    "【城市】白地建城 20 钱，升级 20 钱/级，最高 4 级；游牧势力不能升级城市（可从白地建 1 级城市）。",
+    "【发展度价格】基础价格按地形：农田 0.9、平原 1.0、旱地 1.1、森林/草原/高原 1.2、丘陵 1.3、丛林/山地 1.4、沙漠 1.5；每满 20 发展度再加 0.5（部分文明有折扣）。",
+    "【行动阶段】非骑兵单位每回合可调动1次或进攻1次；骑兵/有奔袭、机动等词条的单位可行动2次（不可连续战斗两次）。调动或进攻必须从一个地块到相邻陆地地块。",
+    "【地形惩罚】攻方进攻森林/丛林/丘陵/高原-1；山地/沙漠-2；跨河/跨海-1；飞地（与首都不连通）驻军战力-1。",
+    "【战斗】每个单位依次与守方一个单位单挑：双方各掷1d6，加上兵种/词条/地形修正，最终点数限制在1~10；高点获胜。步兵优先攻击步兵→骑兵→远程，骑兵优先攻击骑兵→步兵→远程，远程可自由选择目标。",
+    "【收入】每回合开始结算：单地块收入=发展度×5%×(2×城市等级+1)，另加建筑/势力加成；国库上限3000。",
+    "【胜利】默认占领全部城市；沙盒模式可在设置中切换胜利条件（占领全部地块/城市等）。AI 对局只使用沙盒模式。"
+  ].join("\n");
+}
+
+function aiLegalActionsBrief() {
+  const f = picks[currentPlayerIdx];
+  if (!f) return "（当前无势力）";
+  const lines = [];
+  const own = [];
+  for (const p of DATA) {
+    const s = provState[p.id];
+    if (s && s.owner === f) own.push(p);
+  }
+  if (gamePhase === "build") {
+    lines.push("建造阶段允许：develop（提升发展度）、build_city（建/升城市）、recruit（招募）、build_building（专属建筑）、evolve（若满足进化条件）、支援其他玩家。");
+    ensureBuildings();
+    const bdef = FACTION_BUILDINGS[f] || (evolved[f] ? FACTION_BUILDINGS[f + "_evo"] : null);
+    for (const p of own) {
+      const s = provState[p.id];
+      const st = s || {};
+      if ((st.dev || 0) < 200) {
+          const gain = boardMode ? 20 : 1;
+          const costOnce = boardMode ? devCost(provinceById[p.id], st, f) * 20 : devCost(provinceById[p.id], st, f);
+          const maxDevTimes = costOnce > 0 ? Math.floor((playerState[f].treasury || 0) / costOnce) : 0;
+          lines.push("develop 可作用于 " + p.name + "（当前发展 " + (st.dev || 0) + "；每次 +" + gain + "，单价 " + costOnce + " 钱，当前最多提升 " + maxDevTimes + " 次）");
+        }
+      const maxCity = isNomadFaction(f) ? 1 : 4;
+        if ((st.city || 0) < maxCity) lines.push("build_city 可作用于 " + p.name + "（当前Lv" + (st.city || 0) + "，可升至Lv" + maxCity + "；建造/升级 20 钱/级）");
+      if (bdef && !st.building) lines.push("build_building 可作用于 " + p.name + "（可建" + bdef.name + "）");
+      const rec = getRecruitable(f);
+      for (const d of rec) {
+        if (canRecruit(st, d) && (playerState[f].treasury || 0) >= unitCostWithDiscount(f, d, st)) {
+          const cost = unitCostWithDiscount(f, d, st);
+          const maxN = cost > 0 ? Math.floor((playerState[f].treasury || 0) / cost) : 0;
+          lines.push("recruit 可在 " + p.name + " 招募 " + d.name + "×" + maxN + "（单价 " + cost + " 钱，当前最多可招 " + maxN + " 队）");
+        }
+      }
+    }
+    if (canEvolve && canEvolve(f)) lines.push("evolve 当前满足进化条件！");
+  } else {
+    lines.push("行动阶段允许：move（调动到相邻己方/空地）、attack（进攻相邻敌军/中立守军）、skip（结束行动）。");
+    for (const p of own) {
+      const s = provState[p.id];
+      if (!s || !s.units || !s.units.length) continue;
+      const army = aiUnitSummaryText(s);
+      const moveCount = s.units.filter(function(u) { return u.moves >= moveCost(u); }).length;
+      const atkCount = s.units.filter(function(u) { return u.moves > 0 && u.atk > 0; }).length;
+      const nb = NEIGHBORS[p.name] || [];
+      for (const n of nb) {
+        const np = provByName(n);
+        if (!np || !np.is_land) continue;
+        const ns = provState[np.id];
+        if (!ns) continue;
+        if (ns.owner === f) {
+          if (moveCount > 0) lines.push("move 可从 " + p.name + " 到 " + np.name + "（己方；当前兵力 " + army + "，可调动 " + moveCount + " 支）");
+        } else if (!ns.units || !ns.units.length) {
+          if (moveCount > 0) lines.push("move 可从 " + p.name + " 到 " + np.name + "（中立空地；当前兵力 " + army + "，可调动 " + moveCount + " 支）");
+        } else if (atkCount > 0) {
+          lines.push("attack 可从 " + p.name + " 进攻 " + np.name + "（敌方/中立守军 " + aiUnitSummaryText(ns) + "；我军 " + army + "，可进攻 " + atkCount + " 支）");
+        }
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+function aiFactionRuleText() {
+  const lines = [];
+  for (const key in C) {
+    const d = C[key];
+    let s = "### " + key + "　" + (d.trait || "");
+    s += "\n- 特性：" + ((d.props || []).join("；") || "无");
+    if (d.building) s += "\n- 建筑「" + d.building.name + "」（" + d.building.cost + "钱）：" + ((d.building.props || []).join("；") || "");
+    if (d.unit) s += "\n- 特殊兵种「" + d.unit.name + "」：" + d.unit.type + "，" + d.unit.cost + "钱，" + d.unit.power + "，" + (d.unit.req || "") + "；" + ((d.unit.props || []).join("；") || "");
+    if (d.unit2) s += "\n- 特殊兵种「" + d.unit2.name + "」：" + d.unit2.type + "，" + d.unit2.cost + "钱，" + d.unit2.power + "，" + (d.unit2.req || "") + "；" + ((d.unit2.props || []).join("；") || "");
+    if (d.evolveReq) s += "\n- 进化条件：" + d.evolveReq;
+    if (d.evolved) {
+      const e = d.evolved;
+      s += "\n- 进化「" + e.name + "」：" + (e.trait || "") + "；" + ((e.props || []).join("；") || "");
+      if (e.building) s += "；建筑「" + e.building.name + "」（" + e.building.cost + "钱）：" + ((e.building.props || []).join("；") || "");
+      if (e.unit) s += "；兵种「" + e.unit.name + "」：" + e.unit.cost + "钱，" + e.unit.power + "；" + ((e.unit.props || []).join("；") || "");
+      if (e.unit2) s += "；兵种「" + e.unit2.name + "」：" + e.unit2.cost + "钱，" + e.unit2.power + "；" + ((e.unit2.props || []).join("；") || "");
+    }
+    if (d.evolved2) {
+      const e2 = d.evolved2;
+      s += "\n- 进化「" + e2.name + "」：" + (e2.trait || "") + "；" + ((e2.props || []).join("；") || "");
+      if (e2.unit) s += "；兵种「" + e2.unit.name + "」：" + e2.unit.cost + "钱，" + e2.unit.power + "；" + ((e2.unit.props || []).join("；") || "");
+      if (e2.unit2) s += "；兵种「" + e2.unit2.name + "」：" + e2.unit2.cost + "钱，" + e2.unit2.power + "；" + ((e2.unit2.props || []).join("；") || "");
+    }
+    lines.push(s);
+  }
+  return lines.join("\n\n");
+}
+
+function aiUnitDefText() {
+  ensureUnitDefs();
+  const rows = [];
+  for (const k in UNIT_DEFS) {
+    const d = UNIT_DEFS[k];
+    if (!d) continue;
+    rows.push("| " + d.name + " | " + d.type + " | " + d.cost + " | " + d.power + " | " + d.req + " | " + (d.props || []).join("；") + " |");
+  }
+  return "| 兵种 | 类型 | 费用 | 战力 | 需求 | 词条 |\n|---|---|---|---|---|---|\n" + rows.join("\n");
+}
+function buildAIPrompt() {
+  const st = aiStateData();
+  const f = picks[currentPlayerIdx];
+  const title = "第" + currentTurn + "回合 · " + (gamePhase === "build" ? "建造阶段" : "行动阶段") + " · " + (f ? aiFactionTitle(f) : "无");
+  let md = "";
+  md += "# 九州风云 · AI 回合解释书\n\n";
+  md += "> " + title + "\n\n";
+  md += "> 静态规则（各文明特性、进化、建筑、特殊兵种、全部兵种数据）请参考随附的《九州风云 AI 规则书》，本文件只描述当前回合状态和可执行操作。\n\n";
+  md += "## 一、当前可执行操作\n\n" + aiLegalActionsBrief() + "\n\n";
+  md += "## 二、势力状态\n\n";
+  for (const fa of st.factions) {
+    md += "- " + fa.seat + "：" + fa.display + "｜国库 " + fa.treasury + "｜收入 " + fa.income + "｜军力 " + fa.power + "｜地块 " + fa.provinces + "｜城市 " + (fa.cities.join("、") || "无") + (fa.capital ? "｜首都 " + fa.capital : "") + (fa.evolved ? "｜已进化 " + fa.evolved : "") + (fa.eliminated ? "｜已灭亡" : "") + "\n";
+  }
+  md += "\n## 三、地块状态\n\n";
+  md += "| 地块 | 地形 | 归属 | 城市 | 发展 | 建筑 | 军队 | 收入 |\n|---|---|---|---|---|---|---|---|\n";
+  for (const p of st.provinces) {
+    md += "| " + p.name + " | " + p.terrain + " | " + (p.owner ? displayName(p.owner) : "中立") + " | Lv" + p.city + " | " + p.dev + " | " + (p.building || "无") + " | " + aiUnitSummaryText(provState[p.id]) + " | " + Math.round(p.income * 100) / 100 + " |\n";
+  }
+  md += "\n## 四、机器可读状态\n\n```json\n" + JSON.stringify(st, null, 2) + "\n```\n\n";
+  md += "## 五、请输出\n\n";
+  md += "请基于以上回合局势，为 **" + (f ? aiFactionTitle(f) : "当前势力") + "** 制定本回合行动。只返回一个 JSON 数组，不要 Markdown 代码块，不要解释。\n";
+  md += "- 招募必须写清：province（地点）、unit（兵种）、count（招募数量）。\n";
+  md += "- 提升发展度必须写清：province（地块）、times（次数）或 to（目标发展度）。\n";
+  md += "- 建造/升级城市必须写清：province（地块）、to_level（目标等级）或 times（次数）。\n";
+  md += "- 调动/进攻必须写清：from（源地）、to（目标）、units（兵力，例如 {\"步兵\":2,\"骑兵\":1}）。\n";
+  md += "数组元素 type 取：develop、build_city、recruit、build_building、move、attack、evolve、skip。示例：\n\n";
+  md += "```json\n[{\"type\":\"develop\",\"province\":\"两淮\",\"times\":3},{\"type\":\"build_city\",\"province\":\"两淮\",\"to_level\":2},{\"type\":\"recruit\",\"province\":\"两淮\",\"unit\":\"步兵\",\"count\":2},{\"type\":\"move\",\"from\":\"两淮\",\"to\":\"江南\",\"units\":{\"步兵\":2,\"骑兵\":1}},{\"type\":\"attack\",\"from\":\"两淮\",\"to\":\"汉\",\"units\":{\"步兵\":3}}]\n```\n";
+  return md;
+}
+
+function aiModeNote() {
+  return "本规则书仅针对默认的沙盒模式编写。\n- 全部 12 个文明可选。\n- 初始资金、初始首都等级、收入倍率、中立军上限/刷新回合、胜利条件等按当前设置。\n- 沙盒默认初始资金 10、收入倍率 1。";
+}
+
+function buildAIRulebook() {
+  let md = "# 九州风云 · AI 规则书\n\n";
+  md += "## 模式说明\n\n" + aiModeNote() + "\n\n";
+  md += "## 基础规则\n\n" + aiRulesDigest() + "\n\n";
+  md += "## 文明规则\n\n" + aiFactionRuleText() + "\n\n";
+  md += "## 兵种数据\n\n" + aiUnitDefText() + "\n";
+  return md;
+}
+
+function exportAIRulebook() {
+  try {
+    aiDownloadText("九州风云_规则书.txt", buildAIRulebook());
+    showToast("📕 规则书已导出");
+  } catch (e) {
+    showToast("规则书导出失败：" + e.message);
+  }
+}
+
+function exportAIPack() {
+  try {
+    const f = picks[currentPlayerIdx];
+    const name = "九州风云_回合_第" + currentTurn + "回合_" + (f ? displayName(f) : "无") + ".txt";
+    aiDownloadText(name, buildAIPrompt());
+    showToast("📘 回合已导出");
+  } catch (e) {
+    showToast("导出失败：" + e.message);
+  }
+}
+
+function openAIDecision() {
+  const el = document.getElementById("ai-modal");
+  if (el) el.classList.remove("hidden");
+  const ta = document.getElementById("ai-decision-input");
+  if (ta && !ta.value) ta.value = "";
+}
+function closeAIDecision() {
+  const el = document.getElementById("ai-modal");
+  if (el) el.classList.add("hidden");
+}
+
+function aiTryParseJSONArray(raw) {
+  if (!raw) return null;
+  let s = raw.replace(/```json/gi, "").replace(/```/g, "");
+  const a = s.indexOf("["), b = s.lastIndexOf("]");
+  if (a < 0 || b <= a) return null;
+  try {
+    const obj = JSON.parse(s.slice(a, b + 1));
+    if (Array.isArray(obj)) return obj;
+    if (obj && Array.isArray(obj.actions)) return obj.actions;
+    if (obj && Array.isArray(obj.decisions)) return obj.decisions;
+    if (obj && Array.isArray(obj.commands)) return obj.commands;
+  } catch (e) { /* fallthrough */ }
+  return null;
+}
+
+function aiNormDecision(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  let type = String(obj.type || obj.action || obj.op || obj.command || "").toLowerCase().trim();
+  const alias = {
+    "提升发展度":"develop","发展":"develop","升级发展":"develop",
+    "建造城市":"build_city","升级城市":"build_city","建城":"build_city","建市":"build_city",
+    "招募":"recruit","征兵":"recruit","招兵":"recruit",
+    "建造建筑":"build_building","建筑":"build_building","修建筑":"build_building",
+    "调动":"move","移动":"move","进军":"move",
+    "进攻":"attack","攻击":"attack","打仗":"attack",
+    "进化":"evolve","变身":"evolve","建国":"evolve",
+    "跳过":"skip","结束":"skip","过":"skip","pass":"skip"
+  };
+  if (alias[type]) type = alias[type];
+  const get = function() {
+    for (let i = 0; i < arguments.length; i++) {
+      if (arguments[i] && obj[arguments[i]] !== undefined && obj[arguments[i]] !== null && obj[arguments[i]] !== "") return String(obj[arguments[i]]).trim();
+    }
+    return "";
+  };
+  const prov = (type === "move" || type === "attack") ? "" : get("province", "地块", "place", "location", "name", "target");
+  const unit = get("unit", "兵种", "troop", "army");
+  const from = get("from", "source", "src", "源", "起点").replace(/^从\s*/, "");
+  const to = get("to", "target", "dest", "dst", "目标", "终点").replace(/^(?:到|至|->|→|>)\s*/, "");
+  const count = parseInt(get("count", "数量", "num"), 10) || 0;
+  const times = parseInt(get("times", "次数"), 10) || 0;
+  const toLevel = parseInt(get("to_level", "city_to", "target_level", "level", "目标等级"), 10) || 0;
+  const toDev = type === "develop" ? parseInt(get("to", "target_dev", "to_dev", "目标发展度"), 10) || 0 : 0;
+  const units = obj.units || {};
+  if (!type) return null;
+  return { type: type, province: prov, unit: unit, from: from, to: to, count: count, times: times, toLevel: toLevel, toDev: toDev, units: units };
+}
+
+function aiParseLine(line) {
+  let s = line.trim();
+  s = s.replace(/^(?:建议|决策|行动|方案|计划|步骤)\s*[:：]\s*/, "");
+  s = s.replace(/^第[一二三四五六七八九十\d]+[步条项]\s*[:：]?\s*/, "");
+  s = s.replace(/^\s*[-*\d.)、\s]+/, "").trim();
+  if (!s) return null;
+  const aliasCmd = function(pat) {
+    let m = s.match(pat); return m ? m.slice(1).map(function(x) { return x.trim(); }) : null;
+  };
+  let m;
+  if ((m = aliasCmd(/(?:develop|提升发展度|发展)\s+(\S+)(?:\s+(\d+))?/i))) return { type:"develop", province: m[0], times: parseInt(m[1] || "0", 10) || 0 };
+  if ((m = s.match(/提升\s*(\S+?)\s*发展度/))) return { type:"develop", province: m[1] };
+  if ((m = aliasCmd(/(?:build_city|建造城市|升级城市|建城)\s+(\S+)(?:\s+(\d+))?/i))) return { type:"build_city", province: m[0], toLevel: parseInt(m[1] || "0", 10) || 0 };
+  if ((m = s.match(/(?:在)?\s*(\S+?)\s*(?:建造城市|建城|升级城市)/))) return { type:"build_city", province: m[1] };
+  if ((m = aliasCmd(/(?:recruit|招募|征兵)\s+(\S+)\s+(\S+)(?:\s+(\d+))?/i))) return { type:"recruit", unit: m[0], province: m[1], count: parseInt(m[2] || "0", 10) || 0 };
+  if ((m = aliasCmd(/在\s*(.+?)\s*(?:招募|征兵)\s*(\S+)(?:\s*(\d+))?/))) return { type:"recruit", province: m[0], unit: m[1], count: parseInt(m[2] || "0", 10) || 0 };
+  if ((m = aliasCmd(/(?:build_building|建造建筑|修建建筑)\s+(\S+)/i))) return { type:"build_building", province: m[0] };
+  if ((m = aliasCmd(/(?:move|调动|移动|进军)\s+(?:从\s*)?(\S+)\s*(?:到|至|->|→)?\s*(\S+)/i))) return { type:"move", from:m[0], to:m[1].replace(/^(?:到|至|->|→|>)\s*/, "") };
+  if ((m = aliasCmd(/(?:从\s*)?(.+?)\s*(?:调动|移动到|移动至|调到)\s*(.+)/))) return { type:"move", from:m[0], to:m[1].replace(/^(?:到|至|->|→|>)\s*/, "") };
+  if ((m = aliasCmd(/(?:attack|进攻|攻击)\s+(?:从\s*)?(\S+)\s*(?:到|至|->|→)?\s*(\S+)/i))) return { type:"attack", from:m[0], to:m[1].replace(/^(?:到|至|->|→|>)\s*/, "") };
+  if ((m = aliasCmd(/(?:从\s*)?(.+?)\s*(?:进攻|攻击)\s*(.+)/))) return { type:"attack", from:m[0], to:m[1].replace(/^(?:到|至|->|→|>)\s*/, "") };
+  if (/^(evolve|进化|变身|建国)$/i.test(s)) return { type:"evolve" };
+  if (/^(skip|pass|结束|跳过|过)$/i.test(s)) return { type:"skip" };
+  return null;
+}
+
+function aiStepText(step) {
+  const type = step.type;
+  const unitText = function(u) {
+    if (!u || typeof u !== "object") return "";
+    const parts = [];
+    for (const k in u) if (u[k] > 0) parts.push(k + "×" + u[k]);
+    return parts.join("、");
+  };
+  if (type === "develop") return "提升 " + (step.province || "?") + " 发展度" + (step.toDev ? "到" + step.toDev : "") + (step.times ? " ×" + step.times + "次" : "");
+  if (type === "build_city") return "在 " + (step.province || "?") + " 建造/升级城市" + (step.toLevel ? "到Lv" + step.toLevel : "") + (step.times ? " ×" + step.times + "次" : "");
+  if (type === "recruit") return "在 " + (step.province || "?") + " 招募 " + (step.unit || "?") + (step.count ? "×" + step.count : "");
+  if (type === "build_building") return "在 " + (step.province || "?") + " 建造专属建筑";
+  if (type === "move") return "从 " + (step.from || "?") + " 调动至 " + (step.to || "?") + (unitText(step.units) ? "（兵力：" + unitText(step.units) + "）" : "");
+  if (type === "attack") return "从 " + (step.from || "?") + " 进攻 " + (step.to || "?") + (unitText(step.units) ? "（兵力：" + unitText(step.units) + "）" : "");
+  if (type === "evolve") return "尝试进化/建立新国号";
+  if (type === "skip") return "跳过/结束本阶段";
+  return type + " " + JSON.stringify(step);
+}
+
+function aiStepWarn(step) {
+  const warns = [];
+  const curF = picks[currentPlayerIdx];
+  if (step.province && !provByName(step.province)) warns.push("找不到地块：" + step.province);
+  if (step.from && !provByName(step.from)) warns.push("找不到源地：" + step.from);
+  if (step.to && !provByName(step.to)) warns.push("找不到目标：" + step.to);
+  if (step.type === "recruit" && step.unit && UNIT_DEFS && !UNIT_DEFS[step.unit]) warns.push("未知兵种：" + step.unit);
+  if (curF && step.province) {
+    const pp = provByName(step.province);
+    if (pp) {
+      const st = provState[pp.id];
+      if (!st || st.owner !== curF) warns.push(step.province + " 不是当前势力地块");
+    }
+  }
+  if ((step.type === "develop" || step.type === "build_city" || step.type === "recruit" || step.type === "build_building" || step.type === "evolve") && gamePhase !== "build") warns.push("当前不是建造阶段");
+  if ((step.type === "move" || step.type === "attack") && gamePhase !== "action") warns.push("当前不是行动阶段");
+  if (step.from && step.to) {
+    const fp = provByName(step.from), tp = provByName(step.to);
+    if (fp && tp) {
+      const nb = NEIGHBORS[fp.name] || [];
+      if (nb.indexOf(tp.name) < 0) warns.push("两地不相邻：" + step.from + " ↔ " + step.to);
+    }
+  }
+  return warns.length ? " <span style='color:#ff8a8a'>⚠️ " + warns.join("；") + "</span>" : "";
+}
+
+function parseAIDecision() {
+  const raw = document.getElementById("ai-decision-input").value || "";
+  const result = document.getElementById("ai-decision-result");
+  let steps = [];
+  const arr = aiTryParseJSONArray(raw);
+  if (arr) {
+    for (const obj of arr) {
+      const d = aiNormDecision(obj);
+      if (d) steps.push(d);
+    }
+  } else {
+    const lines = raw.split(/\n/);
+    for (const line of lines) {
+      const d = aiParseLine(line);
+      if (d) steps.push(d);
+    }
+  }
+  if (!steps.length) {
+    result.innerHTML = "<div style='color:#ff8a8a'>没有识别到决策。请粘贴 JSON 数组，或使用 develop/build_city/recruit/move/attack 等文本命令。</div>";
+    return;
+  }
+  let html = "<div style='margin-bottom:6px;color:#ffd700'>识别到 " + steps.length + " 条决策，请按以下顺序人工执行：</div><ol>";
+  for (const step of steps) {
+    html += "<li>" + aiStepText(step) + aiStepWarn(step) + "</li>";
+  }
+  html += "</ol>";
+  result.innerHTML = html;
+}
+
+function copyAIChecklist() {
+  const result = document.getElementById("ai-decision-result");
+  if (!result || !result.innerText) {
+    showToast("请先解析 AI 决策");
+    return;
+  }
+  const text = result.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() { showToast("清单已复制"); }, function() { showToast("复制失败"); });
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    showToast("清单已复制");
+  }
+}
+
 </script>
 
 <div id="goal-modal" class="hidden">
