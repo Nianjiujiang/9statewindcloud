@@ -3546,6 +3546,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     setTimeout(function() { inputLock--; }, aiBusy ? at(350) : at(900));
   }, aiBusy ? at(350) : at(900));
   }, aiBusy ? at(200) : 0); // AI：箭头后 200ms 放结果动画（快速）
+  recordReplayFrame(); // 读史：驻军更新（联合进攻/战斗结算/占领）
 }
 function zhaoNPlus() {
   zhaoN = zhaoN >= 10 ? 1 : zhaoN + 1;
