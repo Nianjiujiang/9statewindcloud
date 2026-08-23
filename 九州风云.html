@@ -3518,6 +3518,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
   const surv = src.units.filter(u => attackers.indexOf(u) >= 0).length;
   // 演出：死亡动画 → 重绘 → 占领/总结（AI 回合等箭头播完再放结果动画）
   inputLock++;
+  if (deadUnits.length > 0 && b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
   if (deadUnits.length > 0) SFX.dead();
   setTimeout(function() {
   for (const du of deadUnits) { const sp = spanOf(du.uid); if (sp) { sp.classList.add("dying"); deathAnim(du); } }
@@ -3767,7 +3768,8 @@ function saveGame() {
       neutralCap: neutralCap, neutralStartTurn: neutralStartTurn, winCond: winCond, centralPlains: centralPlains,
       startMoney: startMoney, startCapLv: startCapLv, incomeMult: incomeMult, boardMode: boardMode, turnTimeLimit: turnTimeLimit, enclaveOn: enclaveOn, terrainOn: terrainOn,
       mapView: mapView, unitUid: unitUid, gameOverShown: gameOverShown, goalWon: goalWon,
-      forceReloc: forceReloc // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
+      forceReloc: forceReloc, // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
+      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn) // 死亡地块记录（存档防丢失）
     };
     // 存档 = 下载 JSON 文件（玩家自己保存）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); // 缩进 2 空格多行格式：史官记录/地块状态可直接查看与手动编辑
@@ -3863,6 +3865,7 @@ function applyLoadedSave(d) {
     elimChecking = false;
     // 读档修复：恢复挂起的强制迁都（首都失陷但尚未迁都）；旧存档无 forceReloc 字段 → 校验首都归属，失陷则重新挂起
     forceReloc = (d.forceReloc && !eliminated[d.forceReloc]) ? d.forceReloc : null;
+    diedLastTurn = new Set(d.diedLastTurn || []); diedThisTurn = new Set(d.diedThisTurn || []); // 恢复死亡地块记录
     if (!forceReloc) {
       for (const f in mutableCapital) {
         if (eliminated[f]) continue;
@@ -8055,13 +8058,13 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
 
   // 移除死亡单位数据 + 播放死亡动画
   const deadUnits = [];
-  if (b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 战斗地块死过人（即使未死也先记，后续 deadUnits 判断）
   if (!defAlive) { dst.units = dst.units.filter(u => u.uid !== defUnit.uid); deadUnits.push(defUnit); }
   if (!atkAlive) { src.units = src.units.filter(u => u.uid !== atkUnit.uid); deadUnits.push(atkUnit); }
   for (const du of deadUnits) {
     const sp = spanOf(du.uid);
     if (sp) { sp.classList.add("dying"); deathAnim(du); }
   }
+  if (deadUnits.length > 0 && b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
   if (deadUnits.length > 0) SFX.dead();
   // 顺势占领：攻方存活且守方全灭
   let captured = false;
