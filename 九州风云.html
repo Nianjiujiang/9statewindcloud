@@ -2592,7 +2592,7 @@ function isCoastal(prov) {
   // 假沿海来源：画布背景为海色，地块间缝隙/地图边缘未覆盖区域会暴露海色，包围盒边缘采样会误判
   return COASTAL_PROVS.indexOf(prov.name) >= 0;
 }
-// 建造/升级城市：0→1 建城 20 钱，之后统一 30 钱（游牧建城+5），市舶司 -10，最高 4 级
+// 建造/升级城市：0→1 建城 20 钱，之后统一 20 钱（游牧建城+5），市舶司 -10，最高 4 级
 // 死亡地块记录：本回合死过人的地块，下回合开始不刷中立兵
 let diedThisTurn = new Set(), diedLastTurn = new Set();
 // 中立地块刷兵（animate=true 时带移动动画；开局静默摆放）
