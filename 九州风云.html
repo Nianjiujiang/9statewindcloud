@@ -3777,7 +3777,8 @@ function saveGame() {
       startMoney: startMoney, startCapLv: startCapLv, incomeMult: incomeMult, boardMode: boardMode, turnTimeLimit: turnTimeLimit, enclaveOn: enclaveOn, terrainOn: terrainOn,
       mapView: mapView, unitUid: unitUid, gameOverShown: gameOverShown, goalWon: goalWon,
       forceReloc: forceReloc, // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
-      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn) // 死亡地块记录（存档防丢失）
+      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn), // 死亡地块记录（存档防丢失）
+      humanElimShown: humanElimShown // 人类全灭结算标志（防读档后重复弹窗）
     };
     // 存档 = 下载 JSON 文件（玩家自己保存）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); // 缩进 2 空格多行格式：史官记录/地块状态可直接查看与手动编辑
@@ -3853,6 +3854,7 @@ function applyLoadedSave(d) {
     unitUid = d.unitUid || 1;
     gameOverShown = !!d.gameOverShown;
     goalWon = d.goalWon || {};
+    humanElimShown = !!d.humanElimShown; // 恢复人类全灭结算标志（防读档后重复弹窗）
     // 进入地图
     document.getElementById("pick").classList.add("hidden");
     document.getElementById("map-page").classList.remove("hidden");
