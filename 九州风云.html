@@ -3777,10 +3777,10 @@ function saveGame() {
       startMoney: startMoney, startCapLv: startCapLv, incomeMult: incomeMult, boardMode: boardMode, turnTimeLimit: turnTimeLimit, enclaveOn: enclaveOn, terrainOn: terrainOn,
       mapView: mapView, unitUid: unitUid, gameOverShown: gameOverShown, goalWon: goalWon,
       forceReloc: forceReloc, // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
-      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn), // 死亡地块记录（存档防丢失）
       humanElimShown: humanElimShown, // 人类全灭结算标志（防读档后重复弹窗）
       diploUsed: diploUsed, // 本回合已使用的外交机会（防读档后重复使用）
-      diplomacyMessages: diplomacyMessages // AI 外交消息记录（防读档后丢失）
+      diplomacyMessages: diplomacyMessages, // AI 外交消息记录（防读档后丢失）
+      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn) // 死亡地块记录（存档防丢失）
     };
     // 存档 = 下载 JSON 文件（玩家自己保存）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); // 缩进 2 空格多行格式：史官记录/地块状态可直接查看与手动编辑
@@ -8078,7 +8078,7 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
     const sp = spanOf(du.uid);
     if (sp) { sp.classList.add("dying"); deathAnim(du); }
   }
-  if (deadUnits.length > 0 && b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
+  if (deadUnits.length > 0 && tgt.name) diedThisTurn.add(tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
   if (deadUnits.length > 0) SFX.dead();
   // 顺势占领：攻方存活且守方全灭
   let captured = false;
@@ -9470,10 +9470,10 @@ function diploParseLine(line) {
   s = s.replace(/^第[一二三四五六七八九十\d]+[步条项]\s*[:：]?\s*/, "");
   s = s.replace(/^\s*[-*\d.)、\s]+/, "").trim();
   let m;
-  if ((m = s.match(/^(?:send|主动发消息|发消息|主动)\s*(\S+)\s*(?:to|给|对|->|→)?\s*(\S+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
-  if ((m = s.match(/^(?:reply|回复|回话)\s*(\S+)\s*(?:to|给|对|->|→)?\s*(\S+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
-  if ((m = s.match(/^(\S+)\s*(?:对|给)\s*(\S+)\s*(?:说|发消息)\s*[：:]?\s*(.*)/))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
-  if ((m = s.match(/^(\S+)\s*回复\s*(\S+)\s*[：:]?\s*(.*)/))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(?:send|主动发消息|发消息|主动)\s*(\S+)\s*(?:to|给|对|->|→)?\s*([^\s：:]+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(?:reply|回复|回话)\s*(\S+)\s*(?:to|给|对|->|→)?\s*([^\s：:]+)\s*(?:说|：|:)?\s*(.*)/i))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(\S+)\s*(?:对|给)\s*([^\s：:]+)\s*(?:说|发消息)\s*[：:]?\s*(.*)/))) return { action:"send", from:m[1], to:m[2], message:m[3].trim() };
+  if ((m = s.match(/^(\S+)\s*回复\s*([^\s：:]+)\s*[：:]?\s*(.*)/))) return { action:"reply", from:m[1], to:m[2], message:m[3].trim() };
   return null;
 }
 
@@ -9497,10 +9497,20 @@ function diploParseRaw(raw) {
     } catch (e) { /* fallthrough */ }
   }
   const out = [];
-  for (const line of raw.split(/\n/)) {
+  let pending = null;
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) {
+      if (pending) { out.push(pending); pending = null; }
+      continue;
+    }
     const d = diploParseLine(line);
-    if (d) out.push(d);
+    if (d) { if (pending) { out.push(pending); pending = null; } pending = d; } else if (pending) {
+      pending.message = (pending.message ? pending.message + "\n" : "") + line;
+    }
   }
+  if (pending) out.push(pending);
   return out;
 }
 
