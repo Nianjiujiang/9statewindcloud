@@ -3525,7 +3525,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
   const surv = src.units.filter(u => attackers.indexOf(u) >= 0).length;
   // 演出：死亡动画 → 重绘 → 占领/总结（AI 回合等箭头播完再放结果动画）
   inputLock++;
-  if (deadUnits.length > 0 && b.tgt && b.tgt.name) diedThisTurn.add(b.tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
+  if (deadUnits.length > 0 && tgt.name) diedThisTurn.add(tgt.name); // 仅有人死亡时标记地块（规则书：上回合有单位死亡的地块不刷兵）
   if (deadUnits.length > 0) SFX.dead();
   setTimeout(function() {
   for (const du of deadUnits) { const sp = spanOf(du.uid); if (sp) { sp.classList.add("dying"); deathAnim(du); } }
@@ -3546,6 +3546,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     setTimeout(function() { inputLock--; }, aiBusy ? at(350) : at(900));
   }, aiBusy ? at(350) : at(900));
   }, aiBusy ? at(200) : 0); // AI：箭头后 200ms 放结果动画（快速）
+  recordReplayFrame(); // 读史：驻军更新（联合进攻/战斗结算/占领）
 }
 function zhaoNPlus() {
   zhaoN = zhaoN >= 10 ? 1 : zhaoN + 1;
@@ -3776,7 +3777,10 @@ function saveGame() {
       startMoney: startMoney, startCapLv: startCapLv, incomeMult: incomeMult, boardMode: boardMode, turnTimeLimit: turnTimeLimit, enclaveOn: enclaveOn, terrainOn: terrainOn,
       mapView: mapView, unitUid: unitUid, gameOverShown: gameOverShown, goalWon: goalWon,
       forceReloc: forceReloc, // 挂起的强制迁都（首都失陷未迁都）必须存档，否则读档后丢失
-      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn) // 死亡地块记录（存档防丢失）
+      diedLastTurn: Array.from(diedLastTurn), diedThisTurn: Array.from(diedThisTurn), // 死亡地块记录（存档防丢失）
+      humanElimShown: humanElimShown, // 人类全灭结算标志（防读档后重复弹窗）
+      diploUsed: diploUsed, // 本回合已使用的外交机会（防读档后重复使用）
+      diplomacyMessages: diplomacyMessages // AI 外交消息记录（防读档后丢失）
     };
     // 存档 = 下载 JSON 文件（玩家自己保存）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); // 缩进 2 空格多行格式：史官记录/地块状态可直接查看与手动编辑
@@ -3846,12 +3850,15 @@ function applyLoadedSave(d) {
     // 中原逐鹿：读档后重建地名标签（过滤禁用地块，防旧标签残留）
     container.querySelectorAll(".prov-label").forEach(function(l) { l.remove(); });
     createLabels(); updateLabelPositions();
-    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）20; enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false;
+    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）；enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false;
     mapView = d.mapView || "political";
     if (mapView === "economic") mapView = "income"; // 旧存档经济视图 → 收入视图（已拆分）
     unitUid = d.unitUid || 1;
     gameOverShown = !!d.gameOverShown;
     goalWon = d.goalWon || {};
+    humanElimShown = !!d.humanElimShown; // 恢复人类全灭结算标志（防读档后重复弹窗）
+    diploUsed = d.diploUsed || {}; // 恢复本回合已使用的外交机会
+    diplomacyMessages = d.diplomacyMessages || []; // 恢复 AI 外交消息记录
     // 进入地图
     document.getElementById("pick").classList.add("hidden");
     document.getElementById("map-page").classList.remove("hidden");
