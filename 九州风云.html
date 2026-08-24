@@ -9416,12 +9416,8 @@ function diploResolveFaction(name) {
 function updateDiplomacyInfo() {
   const el = document.getElementById("diplomacy-info");
   if (!el) return;
-  const players = diploPlayers();
   const used = diploUsedEntries();
-  const msgs = diploIncoming();
   let h = "当前回合：第 " + currentTurn + " 回合";
-  h += "<br>可参与外交玩家：" + (players.length ? players.map(function(p) { return p.name; }).join("、") : "无");
-  h += "<br>外交消息记录：" + (msgs.length ? msgs.map(function(m) { return "第" + m.turn + "回合 " + displayName(m.from) + " → " + displayName(m.to) + "：" + m.content; }).join("；") : "无");
   h += "<br>已用外交机会：" + (used.length ? used.map(function(u) { return displayName(u.from) + "→" + displayName(u.to); }).join("、") : "无");
   el.innerHTML = h;
 }
@@ -9437,9 +9433,68 @@ function closeDiplomacy() {
   if (el) el.classList.add("hidden");
 }
 
+function aiLastTurnEvents() {
+  if (currentTurn <= 1) return ["暂无，这是第 1 回合。"];
+  const want = "第 " + (currentTurn - 1) + " 回合";
+  const cur = "第 " + currentTurn + " 回合";
+  const prevPrev = "第 " + (currentTurn - 2) + " 回合";
+  const out = [];
+  let collecting = false;
+  for (let i = 0; i < chronicle.length; i++) {
+    const line = chronicle[i];
+    if (!collecting && line.indexOf(want) >= 0) { collecting = true; out.push(line); continue; }
+    if (collecting && (line.indexOf(cur) >= 0 || (currentTurn >= 3 && line.indexOf(prevPrev) >= 0))) break;
+    if (collecting) out.push(line);
+  }
+  return out.length ? out : ["暂无"];
+}
+
+function aiGlobalOverviewText() {
+  const st = aiStateData();
+  let md = "第 " + currentTurn + " 回合全局概况\n";
+  for (const fa of st.factions) {
+    md += "- " + fa.display + "：国库 " + fa.treasury + "，收入 " + fa.income + "，军力 " + fa.power + "，地块 " + fa.provinces + "，城市 " + (fa.cities.join("、") || "无") + (fa.capital ? "，首都 " + fa.capital : "") + "\n";
+  }
+  return md;
+}
+
+function aiCurrentTurnEvents() {
+  const cur = "第 " + currentTurn + " 回合";
+  const out = [];
+  let collecting = false;
+  for (let i = 0; i < chronicle.length; i++) {
+    const line = chronicle[i];
+    if (!collecting && line.indexOf(cur) >= 0) { collecting = true; out.push(line); continue; }
+    if (collecting) out.push(line);
+  }
+  return out;
+}
+
+function aiIsDiplomacyLine(t) {
+  if (!t) return false;
+  if (t.indexOf("外交：") === 0) return true;
+  if (/[^\s]+ 对 [^\s]+ 说：/.test(t)) return true;
+  if (/[^\s]+ 回复 [^\s]+：/.test(t)) return true;
+  return false;
+}
+
+function aiLastTurnSummary() {
+  const lines = [];
+  if (currentTurn > 1) {
+    const prev = aiLastTurnEvents().filter(function(e) { return !aiIsDiplomacyLine(e); });
+    for (const e of prev) lines.push(e);
+  }
+  const cur = aiCurrentTurnEvents().filter(function(e) { return !aiIsDiplomacyLine(e); });
+  for (const e of cur) lines.push(e);
+  return lines.length ? lines.slice(-120) : ["暂无"];
+}
+
+
 function exportDiplomacy() {
   let md = "# 九州风云 · AI 外交书\n\n";
   md += "第 " + currentTurn + " 回合（回合开始）\n\n";
+  md += "## 已发生事件回顾（含上回合与本回合已发生）\n\n" + aiLastTurnSummary().join("\n") + "\n\n";
+  md += "## 本回合全局概况\n\n" + aiGlobalOverviewText() + "\n\n";
   const players = diploPlayers();
   md += "## 可参与外交的玩家\n";
   if (!players.length) md += "暂无\n";
@@ -9447,19 +9502,15 @@ function exportDiplomacy() {
     const typeTxt = p.type === "computer" ? "电脑AI" : "人类玩家";
     md += "- " + p.name + "（" + p.seat + "，" + typeTxt + "）\n";
   }
-  const messages = diploIncoming();
-  md += "\n## 外交消息记录（回合开始前已有）\n";
-  if (!messages.length) md += "暂无\n";
-  for (const m of messages) md += "- 第" + m.turn + "回合：" + displayName(m.from) + " → " + displayName(m.to) + "：" + m.content + "\n";
   const used = diploUsedEntries();
   md += "\n## 本回合已使用外交机会\n";
   md += used.length ? used.map(function(u) { return displayName(u.from) + "→" + displayName(u.to); }).join("、") : "无";
   md += "\n\n## 请选择行动\n";
-  md += "请明确写出“发出者”和“接收者/回复者”，不要按当前轮到谁假设。\n";
-  md += "1. 主动发消息：{\"from\":\"发出者\",\"to\":\"接收者\",\"action\":\"send\",\"message\":\"内容\"}\n";
-  md += "2. 回复消息：{\"from\":\"回复者\",\"to\":\"被回复者\",\"action\":\"reply\",\"message\":\"内容\"}\n";
+    md += "请直接用自然语言输出外交内容，格式为：\n";
+    md += "宋 对 明 说：内容\n";
+    md += "明 回复 宋：内容\n";
   md += "每回合每个语言模型对每个玩家最多一次外交机会，严禁闲聊刷屏。\n";
-  md += "只返回 JSON（单对象或数组）。\n";
+    md += "如果有多个外交对象，请用空行分隔每一组对话。\n";
   aiDownloadText("九州风云_外交书_第" + currentTurn + "回合.txt", md);
   showToast("外交书已导出");
 }
@@ -9745,6 +9796,7 @@ function buildAIPrompt() {
   md += "# 九州风云 · AI 回合解释书\n\n";
   md += "> " + title + "\n\n";
   md += "> 静态规则（各文明特性、进化、建筑、特殊兵种、全部兵种数据）请参考随附的《九州风云 AI 规则书》，本文件只描述当前回合状态和可执行操作。\n\n";
+  md += "## 已发生事件回顾（含上回合与本回合已发生）\n\n" + aiLastTurnSummary().join("\n") + "\n\n";
   md += "## 一、当前可执行操作\n\n" + aiLegalActionsBrief() + "\n\n";
   md += "## 二、势力状态\n\n";
   for (const fa of st.factions) {
@@ -10005,5 +10057,3 @@ function copyAIChecklist() {
 </div>
 </body>
 </html>
-
-
