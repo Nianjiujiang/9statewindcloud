@@ -6,6 +6,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f5f0e8;color:#3d2b1f;overflow:hidden}
 .hidden{display:none!important}
+.map-only-hidden{display:none!important}
 .set-row{display:flex;align-items:center;gap:16px;margin:10px 0}
 .set-row.disabled{opacity:.45;pointer-events:none}
 .set-row label{font-size:16px;color:#4a2c1a;min-width:120px;text-align:right}
@@ -331,6 +332,7 @@ canvas { display:block; image-rendering:pixelated; image-rendering:crisp-edges;}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f5f0e8;color:#3d2b1f;overflow:hidden}
 .hidden{display:none!important}
+.map-only-hidden{display:none!important}
 .set-row{display:flex;align-items:center;gap:16px;margin:10px 0}
 .set-row.disabled{opacity:.45;pointer-events:none}
 .set-row label{font-size:16px;color:#4a2c1a;min-width:120px;text-align:right}
@@ -4343,12 +4345,13 @@ function fmtBattlePoint(dice, R) {
 function openChronicle() {
   const el = document.getElementById("chronicle-list");
   if (!chronicle.length) el.innerHTML = "<div style='color:#999;padding:10px'>暂无记录</div>";
-  else el.innerHTML = chronicle.map((c) => c.indexOf("――") === 0 ? "<div style='color:#ffd700;text-align:center;margin:6px 0;letter-spacing:2px;font-weight:bold'>" + c + "</div>" : "<div class='cl'>" + c + "</div>").join("");
+  else el.innerHTML = chronicle.map((c) => c.indexOf("――") === 0 ? "<div style='color:#ffd700;text-align:center;margin:6px 0;letter-spacing:2px;font-weight:bold'>" + c + "</div>" : "<div class='cl'>" + splitDiplomacyHeader(c).replace(/\n/g, "<br>") + "</div>").join("");
   document.getElementById("chronicle-modal").classList.remove("hidden");
 }
 function closeChronicle() { document.getElementById("chronicle-modal").classList.add("hidden"); }
 function exportChronicle() {
-  const t = ["九州风云 战报", "回合数：" + currentTurn, "生成时间：" + new Date().toLocaleString(), "--------------------------------", ""].join("\n") + chronicle.join("\n"); // 导出不带序号
+  const body = chronicle.map(function(c) { return splitDiplomacyHeader(c); }).join("\n");
+  const t = ["九州风云 战报", "回合数：" + currentTurn, "生成时间：" + new Date().toLocaleString(), "--------------------------------", ""].join("\n") + body; // 导出不带序号
   const blob = new Blob(["\ufeff" + t], { type: "text/plain;charset=utf-8" }); // 纯文本史官（读史直接解析文本，无需回放段）
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -9343,6 +9346,30 @@ function aiDownloadText(filename, text, mime) {
 
 // AI 模型辅助开关：在设置界面按空格启动/关闭，启动后才显示 AI LLM 相关按钮
 let aiLLMEnabled = false;
+
+// 仅看地图模式：按 Q 隐藏大部分 UI，只保留地图
+let mapOnlyMode = false;
+function toggleMapOnly() {
+  mapOnlyMode = !mapOnlyMode;
+  const ids = ["players", "players-tab", "turn-label", "turn-timer", "view-box", "save-box", "turn-box", "info"];
+  for (let i = 0; i < ids.length; i++) {
+    const el = document.getElementById(ids[i]);
+    if (!el) continue;
+    if (mapOnlyMode) el.classList.add("map-only-hidden");
+    else el.classList.remove("map-only-hidden");
+  }
+  showToast(mapOnlyMode ? "已进入仅看地图模式（按 Q 恢复）" : "已恢复正常界面");
+}
+document.addEventListener("keydown", function(e) {
+  if (e.key !== "q" && e.key !== "Q") return;
+  const mapEl = document.getElementById("map-page");
+  if (!mapEl || mapEl.classList.contains("hidden")) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+  e.preventDefault();
+  if (!e.repeat) toggleMapOnly();
+});
+
 function toggleAIModel() {
   aiLLMEnabled = !aiLLMEnabled;
   updateAILLMUI();
@@ -9478,6 +9505,19 @@ function aiIsDiplomacyLine(t) {
   return false;
 }
 
+function splitDiplomacyHeader(t) {
+  if (!t) return t;
+  const replyIdx = t.indexOf(" 回复 ");
+  if (replyIdx >= 0) {
+    const colon = t.indexOf("：", replyIdx);
+    if (colon >= 0 && t.charAt(colon + 1) !== "\n") return t.slice(0, colon + 1) + "\n" + t.slice(colon + 1);
+  }
+  const sendIdx = t.indexOf(" 说：");
+  if (sendIdx >= 0 && t.charAt(sendIdx + 3) !== "\n") return t.slice(0, sendIdx + 3) + "\n" + t.slice(sendIdx + 3);
+  return t;
+}
+
+
 function aiLastTurnSummary() {
   const lines = [];
   if (currentTurn > 1) {
@@ -9592,7 +9632,7 @@ function importDiplomacy() {
     if (diploUsed[key]) { html += "<div>❌ " + displayName(from) + " → " + displayName(to) + " 本回合已使用过外交机会</div>"; continue; }
     diplomacyMessages.push({ turn: currentTurn, from: from, to: to, content: content, kind: action });
     diploUsed[key] = true;
-    chronicleAdd(displayName(from) + (action === "reply" ? " 回复 " : " 对 ") + displayName(to) + (action === "reply" ? "：" : " 说：") + content);
+    chronicleAdd(displayName(from) + (action === "reply" ? " 回复 " : " 对 ") + displayName(to) + (action === "reply" ? "：" : " 说：") + "\n" + content);
     html += "<div>✅ 已记载：" + displayName(from) + (action === "reply" ? " 回复 " : " 对 ") + displayName(to) + "：" + content + "</div>";
     ok++;
   }
@@ -9602,6 +9642,50 @@ function importDiplomacy() {
 }
 
 
+
+
+function buildDiplomacyOrderedText() {
+  const msgs = diplomacyMessages.slice();
+  const used = {};
+  const fromOrder = [];
+  const byFrom = {};
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (!byFrom[m.from]) { byFrom[m.from] = []; fromOrder.push(m.from); }
+    byFrom[m.from].push(m);
+  }
+  const out = [];
+  for (let fi = 0; fi < fromOrder.length; fi++) {
+    const f = fromOrder[fi];
+    const list = byFrom[f];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      const key = m.from + "|" + m.to + "|" + m.turn;
+      if (used[key]) continue;
+      const hasIncomingSameTurn = msgs.some(function(r) {
+        return r.from === m.to && r.to === m.from && r.turn === m.turn && r.kind === "send" && !used[r.from + "|" + r.to + "|" + r.turn];
+      });
+      if (m.kind === "reply" || hasIncomingSameTurn) {
+        out.push(displayName(m.from) + " 回复 " + displayName(m.to) + "：" + m.content);
+      } else {
+        out.push(displayName(m.from) + " 对 " + displayName(m.to) + " 说：" + m.content);
+      }
+      used[key] = true;
+      if (m.kind === "send") {
+        for (let j = 0; j < msgs.length; j++) {
+          const r = msgs[j];
+          const rkey = r.from + "|" + r.to + "|" + r.turn;
+          if (r.from === m.to && r.to === m.from && r.turn === m.turn && r.kind === "reply" && !used[rkey]) {
+            out.push(displayName(r.from) + " 回复 " + displayName(r.to) + "：" + r.content);
+            used[rkey] = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  return out.join("\n");
+}
 
 function aiUnitSummaryText(s) {
   if (!s || !s.units || !s.units.length) return "无";
