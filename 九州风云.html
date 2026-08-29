@@ -9353,7 +9353,7 @@ let aiLLMEnabled = false;
 let mapOnlyMode = false;
 function toggleMapOnly() {
   mapOnlyMode = !mapOnlyMode;
-  const ids = ["players", "players-tab", "turn-label", "turn-timer", "view-box", "save-box", "turn-box", "info"];
+  const ids = ["players", "players-tab", "turn-label", "turn-timer", "view-box", "save-box", "turn-box", "info", "btn-ai-row"];
   for (let i = 0; i < ids.length; i++) {
     const el = document.getElementById(ids[i]);
     if (!el) continue;
