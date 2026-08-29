@@ -3869,7 +3869,6 @@ function applyLoadedSave(d) {
     document.getElementById("players").classList.remove("hidden");
     document.getElementById("view-box").classList.remove("hidden");
     document.getElementById("save-box").classList.remove("hidden");
-    if (typeof recOnGameEnter === "function") recOnGameEnter(); // 读档续战也算一局：自动开始录屏
     if (typeof updateAILLMUI === "function") updateAILLMUI();
     collapsePlayersOnMobile();
     // 清理上一次游戏结束的结算残留（go-mask 遮罩/结算面板/回合计时器）——否则读档后旧结算画面挡住地图
@@ -8572,7 +8571,6 @@ function showMap(){
   document.getElementById("players").classList.remove("hidden");
   document.getElementById("view-box").classList.remove("hidden");
   document.getElementById("save-box").classList.remove("hidden");
-  if (typeof recOnGameEnter === "function") recOnGameEnter(); // 每局开始：自动开始录屏（右上角按钮可停止并下载）
   if (typeof updateAILLMUI === "function") updateAILLMUI();
   collapsePlayersOnMobile();
   document.getElementById("turn-timer").classList.remove("hidden");
@@ -10148,98 +10146,5 @@ function copyAIChecklist() {
     <button class="rbtn" onclick="exitReplay()">退出</button>
   </div>
 </div>
-<style>
-/* ===== 局内录屏按钮（右上角） ===== */
-#rec-box{position:fixed;top:16px;right:20px;z-index:870;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:22px;border:1px solid rgba(255,215,0,.45);background:rgba(0,0,0,.78);color:#eee;font-size:13px;cursor:pointer;font-family:inherit;transition:all .2s;letter-spacing:1px}
-#rec-box:hover{border-color:#ffd700;background:rgba(20,14,8,.95)}
-#rec-box .rec-dot{width:10px;height:10px;border-radius:50%;background:#9a9a9a;flex:none}
-#rec-box.recording{border-color:#ff5252;color:#ffe2e2}
-#rec-box.recording .rec-dot{background:#ff5252;animation:rec-blink 1.2s infinite}
-@keyframes rec-blink{0%,100%{opacity:1}50%{opacity:.25}}
-</style>
-<button id="rec-box" class="hidden" onclick="recClick()"><span class="rec-dot"></span>⏺ 录制</button>
-<script>
-// ===== 局内录屏：每局开始（新开局/读档）自动录制，右上角按钮点击后停止并自动下载 =====
-// 浏览器限制：屏幕捕获每次 getDisplayMedia 都会弹一次授权框（选"当前标签页"即可），网页无法完全静默录制。
-(function(){
-  var stream = null, recorder = null, chunks = [], tickTimer = null, startAt = 0, running = false, saving = false;
-
-  function box(){ return document.getElementById("rec-box"); }
-  function supported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && window.MediaRecorder); }
-  function pad(n){ return n < 10 ? "0" + n : "" + n; }
-  function fmt(s){ s = Math.floor(s); return pad(Math.floor(s / 60)) + ":" + pad(s % 60); }
-  function note(msg){ if (typeof showToast === "function") showToast(msg); }
-  function idleUI(){ var b = box(); if (b) b.innerHTML = '<span class="rec-dot"></span>⏺ 录制'; }
-  function tickUI(){
-    var b = box(); if (!b) return;
-    b.innerHTML = '<span class="rec-dot"></span>⏺ 录制中 ' + fmt((Date.now() - startAt) / 1000);
-  }
-  function pickMime(){
-    var cands = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
-    for (var i = 0; i < cands.length; i++) { try { if (MediaRecorder.isTypeSupported(cands[i])) return cands[i]; } catch (e) {} }
-    return "";
-  }
-  function killStream(){ if (stream) { try { stream.getTracks().forEach(function(t){ t.stop(); }); } catch (e) {} stream = null; } }
-  function download(){
-    if (saving) return; saving = true;
-    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-    running = false;
-    killStream();
-    var mime = (recorder && recorder.mimeType) || "video/webm";
-    var blob = chunks.length ? new Blob(chunks, { type: mime }) : null;
-    chunks = []; recorder = null;
-    var b = box();
-    if (b) { b.classList.remove("recording"); idleUI(); b.classList.add("hidden"); }
-    if (!blob) { saving = false; return; }
-    var now = new Date();
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "九州风云_录像_" + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + "_" + pad(now.getHours()) + pad(now.getMinutes()) + "." + (mime.indexOf("mp4") >= 0 ? "mp4" : "webm");
-    a.click();
-    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 10000);
-    saving = false;
-    note("录像已保存到下载");
-  }
-  function stop(){
-    if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch (e) { download(); } }
-    else download();
-  }
-  function start(){
-    if (running) return;
-    if (!supported()) { note("当前浏览器不支持录屏（请用 Chrome/Edge）"); return; }
-    var opts = { video: { frameRate: { ideal: 30 }, width: { ideal: 1920 } }, audio: false, preferCurrentTab: true };
-    navigator.mediaDevices.getDisplayMedia(opts).then(function(s){
-      killStream(); // 防重入：残留的旧流先关掉
-      stream = s; chunks = [];
-      var mime = pickMime();
-      recorder = new MediaRecorder(s, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : { videoBitsPerSecond: 4000000 });
-      recorder.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
-      recorder.onstop = download;
-      var track = s.getVideoTracks()[0];
-      if (track && track.addEventListener) track.addEventListener("ended", function(){ stop(); }); // 用户在浏览器共享条点了"停止共享"
-      recorder.start(4000); // 分片收集，避免超长对局的单块内存峰值
-      running = true; startAt = Date.now();
-      var b = box(); if (b) b.classList.add("recording");
-      tickUI(); tickTimer = setInterval(tickUI, 1000);
-      note("本局录像开始——点右上角⏺结束并下载");
-    }).catch(function(){ note("未选择共享窗口，本局不录制（点右上角⏺可重试）"); });
-  }
-  window.recOnGameEnter = function(){ // 每局开始自动调用（showMap 新开局 / applyLoadedSave 读档）
-    var b = box(); if (!b) return;
-    if (running) { // 上一局没手动收尾（如对局中读档）：先落盘旧录像
-      stop();
-      setTimeout(function(){ if (b) { b.classList.remove("hidden"); idleUI(); } start(); }, 80);
-      return;
-    }
-    b.classList.remove("hidden");
-    idleUI();
-    start();
-  };
-  window.recClick = function(){
-    if (running) stop();
-    else { var b = box(); if (b && !b.classList.contains("hidden")) start(); } // 本局内授权失败后的重试
-  };
-})();
-</script>
 </body>
 </html>
