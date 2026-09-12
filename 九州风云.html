@@ -1447,7 +1447,8 @@ function updateTurnUI() {
 // recordWar：记录战争；两国首次开战（上回合无战事）→ 正下方胶囊提示
 let warCapsuleTimer = null;
 function recordWar(a, b) {
-  const key = a + "_" + b;
+  if (!a || !b) return;
+  const key = relKey(a, b); // 统一排序键：A→B 与 B→A 视为同一场战争，防重复扣「首次开战」关系
   if (curWars[key]) return;
   const firstEver = !prevWars[key];
   curWars[key] = true;
@@ -2332,13 +2333,13 @@ function aiBuildTurn() {
         if (isLiao(f2) && bdef.name === "行宫" && !hasXingGong()) {
           // 辽行宫：仅在尚未建造时，选变身需要地块（进化区）中发展度最高的建
           const evoArea = ["准噶尔","漠南","河南","燕云","辽宁","黑龙江"];
-          const cands = own.filter(function(p) { return provState[p.id].building === "" && evoArea.indexOf(p.name) >= 0 && ps2.treasury >= bdef.cost; })
+          const cands = own.filter(function(p) { return provState[p.id].building === "" && evoArea.indexOf(p.name) >= 0 && p.name !== capName && ps2.treasury >= bdef.cost; }) // 排除首都（buildBuilding 禁止首都建行宫）
             .sort(function(a, b) { return (provState[b.id].dev || 0) - (provState[a.id].dev || 0); });
           if (cands.length) eco.push({ t: "bld", roi: 0.3, cost: bdef.cost, pid: cands[0].id });
         } else {
           for (const p of own) {
             const st = provState[p.id];
-            if (st.building === "" && st.owner === f2 && ps2.treasury >= bdef.cost) { // 只能在自己地块造（市舶司等）
+            if (st.building === "" && st.owner === f2 && ps2.treasury >= bdef.cost && (bdef.name !== "运河" || p.name === "河南" || isCoastal(p))) { // 只能在自己地块造；运河限河南/沿海
               let roi = 6;
               if (bdef.name === "运河") {
                 // 运河回本：造价 ÷ 收入（3+当前城市等级，×收入缩放）
@@ -2396,9 +2397,12 @@ function aiBuildTurn() {
       eco.sort(function(a, b) { return a.roi - b.roi; });
       for (const it of eco) {
         if (spentEcon + it.cost <= econBudget && ps2.treasury >= it.cost) {
+          const beforeIt = provState[it.pid] ? { b: provState[it.pid].building, c: provState[it.pid].city, d: provState[it.pid].dev } : null;
           if (it.t === "bld") buildBuilding(it.pid);
           else if (it.t === "city") buildCity(it.pid);
           else boostDev(it.pid);
+          const afterIt = provState[it.pid] || {};
+          if (!beforeIt || (afterIt.b === beforeIt.b && afterIt.c === beforeIt.c && afterIt.d === beforeIt.d)) continue; // 执行失败：不记预算，换候选
           spentEcon += it.cost;
           return setTimeout(aiBuildStep, 15); // 建造步进加速
         }
@@ -2696,7 +2700,7 @@ function autoEconomy() {
   if (bdef && bdef.name !== "行宫" && bdef.name !== "市舶司") { // 自动经济不修行宫/市舶司（需手动）
     for (const p of own) {
       const st = provState[p.id];
-      if (st.building === "" && st.owner === f && ps.treasury >= bdef.cost) {
+      if (st.building === "" && st.owner === f && ps.treasury >= bdef.cost && (bdef.name !== "运河" || p.name === "河南" || isCoastal(p))) { // 运河只能河南/沿海，与 buildBuilding 校验保持一致
         let roi = 6;
         if (bdef.name === "运河") roi = bdef.cost / ((3 + (st.city || 0)) * incomeScale()); // 运河回本：造价 ÷ 收入（3+城市等级，×收入缩放）
         if (bdef.name === "市舶司") {
@@ -2747,18 +2751,20 @@ function autoEconomy() {
   for (const it of eco) {
     if (ps.treasury >= it.cost) {
       const pn = provinceById[it.pid] ? provinceById[it.pid].name : "";
+      const beforeIt = provState[it.pid] ? { b: provState[it.pid].building, c: provState[it.pid].city, d: provState[it.pid].dev } : null;
       if (it.t === "bld") {
         buildBuilding(it.pid);
-        showToast("在" + pn + "建造" + (bdef ? bdef.name : "建筑"));
       } else if (it.t === "city") {
-        const oldC = provState[it.pid] ? provState[it.pid].city : 0;
         buildCity(it.pid);
-        showToast("在" + pn + (oldC === 0 ? "建造城市" : "升级城市"));
       } else {
         const times = it.times || 1;
         for (let k = 0; k < times; k++) boostDev(it.pid, -k * 16); // 连续提升，飘字依次上移错开
-        showToast("在" + pn + "提升" + (times * (boardMode ? 20 : 1)) + "点发展度");
       }
+      const afterIt = provState[it.pid] || {};
+      if (!beforeIt || (afterIt.b === beforeIt.b && afterIt.c === beforeIt.c && afterIt.d === beforeIt.d)) continue; // 执行失败：继续尝试下一个候选（原代码会误报成功并结束）
+      if (it.t === "bld") showToast("在" + pn + "建造" + (bdef ? bdef.name : "建筑"));
+      else if (it.t === "city") showToast("在" + pn + ((beforeIt.c || 0) === 0 ? "建造城市" : "升级城市"));
+      else showToast("在" + pn + "提升" + ((it.times || 1) * (boardMode ? 20 : 1)) + "点发展度");
       return;
     }
   }
@@ -2977,14 +2983,14 @@ function nomadMoveCapital(pid) {
   if (ps.treasury < 5) { showToast("国库不足"); return; }
   ps.treasury -= 5;
   nomadMoved[f] = true;
-  // 旧首都 -1 级，新首都 +1 级（上限4）
+  // 旧首都转移 1 级城市等级至新首都：新都已满级/旧都无级时不转移（双方等级守恒）
   for (const p of DATA) {
     if (p.name === oldCap) {
       const os = provState[p.id];
-      if (os && os.city > 0) os.city--;
+      if (os && os.city > 0 && st.city < 4) { os.city--; st.city++; }
+      break;
     }
   }
-  if (st.city < 4) st.city++;
   mutableCapital[f] = prov.name;
   // 迁都到行宫旧址：补偿行宫造价（20 钱）+ 行宫摧毁（静默生效）
   if (st.building === "行宫") {
@@ -3021,6 +3027,20 @@ function evolveFaction(f, branch) {
       }
     }
   }
+  if (f === "女真" || f === "党项") {
+    // 失去游牧/定难节度：移除现有骑兵的「远射」（蒙古→元仍保留，元特性会给远射）
+    for (const p of DATA) {
+      const s = provState[p.id];
+      if (!s || s.owner !== f) continue;
+      for (const u of s.units) {
+        if (!u.props) continue;
+        const isCavK = u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav");
+        if (!isCavK) continue;
+        const i = u.props.indexOf("远射");
+        if (i >= 0) u.props.splice(i, 1);
+      }
+    }
+  }
   if (f === "蒙古") {
     // 蒙古和平：现有蒙古军队获得「驿站」「远射」：词条
     for (const p of DATA) {
@@ -3039,8 +3059,10 @@ function evolveFaction(f, branch) {
   for (const p of DATA) {
     if (p.name === cap) {
       const s = provState[p.id];
-      if (s && s.city < 4) s.city++;
-      if (f === "党项") s.dev = Math.min(200, (s.dev || 0) + 20); // 定难节度进化：首都+20发展度（上限200）
+      if (s && s.owner === f) { // 首都可能已被攻陷（挂起迁都）：只升级仍属于己方的首都，防给敌方城市升级
+        if (s.city < 4) s.city++;
+        if (f === "党项") s.dev = Math.min(200, (s.dev || 0) + 20); // 定难节度进化：首都+20发展度（上限200）
+      }
       break;
     }
   }
@@ -3493,7 +3515,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
   // 顺势占领：最后击杀者移入
   let captured = false;
   if (dst.units.length === 0 && lastKiller && src.units.some(u => u.uid === lastKiller.uid)) {
-    aiOccupRel(src.owner, defOwner, tgt); // 占领降低关系（倾向地块额外扣）
+    if (defOwner) aiOccupRel(src.owner, defOwner, tgt); // 中立没有关系对象，避免生成 null_势力 脏键
     src.units = src.units.filter(u => u.uid !== lastKiller.uid);
     dst.units.push(lastKiller);
     // 不立即同步坐标：动画从源地块走过去（视觉）
@@ -3841,6 +3863,7 @@ function applyLoadedSave(d) {
     chronicle = d.chronicle || [];
     incomeHistory = d.incomeHistory || {}; powerHistory = d.powerHistory || {};
     debuffState = d.debuffState || {};
+    unitUid = d.unitUid || 1; // 先恢复 uid 计数，再给旧存档缺 uid 的单位补号，防止撞号
     // 读档：单位不存坐标 → 自动按地块围圈分配（旧存档有坐标也统一重排）
     for (const k in provState) {
       const st = provState[k];
@@ -3849,14 +3872,14 @@ function applyLoadedSave(d) {
         try { formCircleNow(parseInt(k)); } catch (e) {}
       }
     }
-    neutralCap = d.neutralCap !== undefined ? d.neutralCap : 2; neutralStartTurn = d.neutralStartTurn !== undefined ? d.neutralStartTurn : 2; winCond = d.winCond || "city"; centralPlains = !!d.centralPlains; if (centralPlains) { for (const p of DATA) { if (CENTRAL_BLOCKED.indexOf(p.name) >= 0) p.is_land = false; } } // 中立上限/起始回合：0 是合法值（如 neutralCap=0 不刷兵），不能用 || 兜底（同 turnTimeLimit）
+    neutralCap = d.neutralCap !== undefined ? d.neutralCap : 2; neutralStartTurn = d.neutralStartTurn !== undefined ? d.neutralStartTurn : 2; winCond = d.winCond || "city"; centralPlains = !!d.centralPlains; for (const p of DATA) { if (CENTRAL_BLOCKED.indexOf(p.name) >= 0) p.is_land = !centralPlains; } // 中原逐鹿：读档双向同步边疆地块通行状态 // 中立上限/起始回合：0 是合法值（如 neutralCap=0 不刷兵），不能用 || 兜底（同 turnTimeLimit）
     // 中原逐鹿：读档后重建地名标签（过滤禁用地块，防旧标签残留）
     container.querySelectorAll(".prov-label").forEach(function(l) { l.remove(); });
     createLabels(); updateLabelPositions();
-    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）；enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false;
+    startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）
+    enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false; // 读档恢复地形/飞地惩罚开关（此前被注释吞掉）
     mapView = d.mapView || "political";
     if (mapView === "economic") mapView = "income"; // 旧存档经济视图 → 收入视图（已拆分）
-    unitUid = d.unitUid || 1;
     gameOverShown = !!d.gameOverShown;
     goalWon = d.goalWon || {};
     humanElimShown = !!d.humanElimShown; // 恢复人类全灭结算标志（防读档后重复弹窗）
@@ -4483,7 +4506,7 @@ function renderReplayFrame(i) {
   renderReplayDiff();
   const evEl = document.getElementById("replay-ev");
   if (evEl) {
-    const _evHtml = (fr.t || []).filter(function(c) { return c.indexOf("战斗：") < 0 && c.indexOf("：国库") < 0 && c.indexOf("――") !== 0; }).map(function(c) {
+    const _evHtml = (fr.t || []).filter(function(c) { return c.indexOf("战斗：") < 0 && c.indexOf("：国库") < 0; }).map(function(c) {
       return c.indexOf("――") === 0 ? "<div style='color:#ffd700;font-weight:bold;margin:8px 0 4px;padding:3px 0;border-top:1px dashed rgba(255,215,0,.25);border-bottom:1px dashed rgba(255,215,0,.25);letter-spacing:1px'>" + c + "</div>" : "<div class='re'>" + c + "</div>";
     }).join("");
     if (_evHtml) { _replayEvBuf = _evHtml; evEl.innerHTML = _evHtml; }
@@ -4559,16 +4582,22 @@ function parseReplayText(raw) {
   function own(pid, f) {
     if (pid === null) return;
     const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] });
-    s.owner = f;
+    s.owner = revName[f] || f; // 事件行里的 辽/金/清/元/夏 还原为原始势力 key
   }
   for (const line of lines) {
     if (!line.trim()) continue;
     // 旧文件兜底：战斗后无损失行 → 按结果规则减员（损失行/顺势占领不触发）
     if (_pending && line.indexOf("损失：") < 0 && line.indexOf("顺势占领") < 0) {
-      if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
-      else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
-      else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
-      _atkPending = null; _pending = null;
+      if (_atkPending && _atkPending.lossHandled) {
+        // 损失行已合并统计过本次进攻序列：不再按单场结果重复减员
+        _pending = null;
+        if (line.indexOf(" 占领 ") < 0) { _atkPending = null; _lastWinner = null; } // 非进驻行：序列结束，清上下文防串场
+      } else {
+        if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
+        else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
+        else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
+        _atkPending = null; _pending = null;
+      }
     }
     // 文件头/座位揭晓：不进入事件区（没人想看）
     if (line.indexOf("九州风云 战报") === 0 || line.indexOf("回合数：") === 0 || line.indexOf("生成时间：") === 0 || line.indexOf("---") === 0 || line.indexOf("随机揭晓") >= 0) continue;
@@ -4625,6 +4654,7 @@ function parseReplayText(raw) {
     // 调动：宋 浙江（步兵×1）调动至 中立 江南 / 宋 江南（步兵×1）调动至 宋 浙江 / 旧格式无归属（被占）兼容
     m = line.match(/^(.+?) (.+?)（(.+?)）调动至 (?:(中立|.+?) )?(.+?)$/);
     if (m) {
+      _atkPending = null; _lastWinner = null; _pending = null; // 调动是非战斗事件：清理残留战斗上下文，防止后续「占领」行错误进驻
       const srcPid = _provId(m[2]), dstPid = _provId(m[5]); // 修复：m[5] 是目标地块（原误用 m[4] 归属当地块查，目标永远不更新）
       const dstOwner = m[4] ? (m[4] === "中立" ? m[1] : m[4]) : m[1]; // 无归属（旧被占格式）→ 调动方
       _removeUnits(srcPid, m[3]);
@@ -4634,7 +4664,7 @@ function parseReplayText(raw) {
     // 进攻：宋 浙江（步人甲×1）进攻 中立 福建（步兵1）——记录进攻上下文，战斗结果行按规则减员
     m = line.match(/^(.+?) (.+?)（(.+?)）进攻 (?:中立|.+?) (.+?)（(.+?)）$/);
     if (m) {
-      _atkPending = { srcPid: _provId(m[2]), defPid: _provId(m[4]), atkSpec: m[3], defSpec: m[5], srcOwner: revName[m[1]] || m[1] };
+      _atkPending = { srcPid: _provId(m[2]), defPid: _provId(m[4]), atkSpec: m[3], defSpec: m[5], srcOwner: revName[m[1]] || m[1], lossHandled: false };
       // 进攻行自带双方兵力明细：若地块尚未记录（如中立守军），用明细初始化，战斗减员才有对象
       var _sp = _provId(m[2]);
       if (_sp !== null) { var _ss = _st[_sp] || (_st[_sp] = { owner: null, city: 0, dev: 0, building: "", units: [] }); if (!_ss.units.length) _addUnits(_sp, m[3]); }
@@ -4657,6 +4687,7 @@ function parseReplayText(raw) {
     if (m && _atkPending) {
       if (m[1] !== "无") _removeUnits(_atkPending.srcPid, m[1]);
       if (m[2] !== "无") _removeUnits(_atkPending.defPid, m[2]);
+      _atkPending.lossHandled = true; // 本次进攻序列已按损失行精确减员：后续战斗行不再兜底
       _pending = null; // 保留 _atkPending 给顺势占领进驻
       pushFrame(); continue;
     }
@@ -4693,9 +4724,11 @@ function parseReplayText(raw) {
     m = line.match(/^(.+?) 顺势占领 (.+?)$/);
     if (m) {
       if (_pending) { // 旧文件：规则减员在此兜底（保留 _atkPending 给进驻）
-        if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
-        else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
-        else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
+        if (!(_atkPending && _atkPending.lossHandled)) {
+          if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
+          else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
+          else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
+        }
         _pending = null;
       }
       const pid = _provId(m[2]);
@@ -5378,9 +5411,9 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
   } else {
     ba.style.display = "none";
   }
-  // 招募区：仅建造阶段 + 当前玩家自己的地块
+  // 招募区：仅建造阶段 + 当前玩家自己的地块（挂起强制迁都时同样隐藏，与建造区一致）
   const ra = document.getElementById("recruit-area");
-  if (gamePhase === "build" && st.owner && playerState[st.owner] && st.owner === picks[currentPlayerIdx]) {
+  if (gamePhase === "build" && st.owner && playerState[st.owner] && st.owner === picks[currentPlayerIdx] && !(forceReloc && picks[currentPlayerIdx] === forceReloc)) {
     const ps = playerState[st.owner];
     const recs = getRecruitable(st.owner);
     let rh = "<div class='ra-title'>招募</div>";
@@ -5471,7 +5504,7 @@ function applySetup(stp) {
   ensureUnitDefs();
   // 势力配置
   for (const f in playerState) {
-    if (stp.money && stp.money[f] !== undefined && (scenarioId === "sandbox" || boardMode)) playerState[f].treasury = stp.money[f]; // 剧本模式国库固定 30，setup.money 不覆盖
+    if (stp.money && stp.money[f] !== undefined && (scenarioId === "sandbox" || boardMode || (SCENARIOS[scenarioId] && SCENARIOS[scenarioId].custom))) playerState[f].treasury = stp.money[f]; // 内置剧本固定 30 不覆盖；沙盒/桌游/自定义剧本应用 setup.money
     if (stp.evolved && stp.evolved[f]) evolved[f] = stp.evolved[f];
     if (stp.capitals && stp.capitals[f]) {
       mutableCapital[f] = stp.capitals[f];
@@ -5679,6 +5712,7 @@ document.addEventListener("keydown", function(e) {
   }
   if (e.key === " ") {
     e.preventDefault();
+    if (forceReloc && picks[currentPlayerIdx] === forceReloc) { showToast("首都失陷：请先点击己方城市迁都"); return; }
     turnClick(); // 空格 = 下一回合/阶段
     return;
   }
@@ -5688,6 +5722,7 @@ document.addEventListener("keydown", function(e) {
   if (!prov) return;
   const s = provState[prov.id];
   if (!s || s.owner !== picks[currentPlayerIdx]) return; // 只能操作自己的地块
+  if (forceReloc && picks[currentPlayerIdx] === forceReloc) { showToast("首都失陷：请先点击己方城市迁都"); return; } // 挂起强制迁都：禁止建造/招募快捷键
   e.preventDefault();
   switch (num) {
     case 1: boostDev(prov.id); break; // 面板 [1] 提升发展度
@@ -6938,9 +6973,10 @@ function checkEliminations() {
       }
     }
   }
-  if (winCond === "history") {
+  if (winCond === "history" && scenarioGoals()) {
     checkGoals(); // 遵循历史：以达成历史目标判定胜负
   } else {
+    // 无历史目标时（自定义剧本/异常存档）退回常规胜负判定，避免游戏无法结算
     if (alive === 1 && !gameOverShown) {
       gameOverShown = true;
       showToast("🏆 " + displayName(winner) + " 统一天下！");
@@ -8089,7 +8125,7 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
   let captured = false;
   if (atkAlive && !defAlive && dst.units.length === 0) {
     const defOwnerB = dst.owner; // 守方原主（push 前取，非中立=玩家地块）
-    aiOccupRel(src.owner, dst.owner, b.tgt); // 占领降低关系（此时 dst.owner 仍是守方原主；倾向地块额外扣）
+    if (dst.owner) aiOccupRel(src.owner, dst.owner, b.tgt); // 中立没有关系对象；此时 dst.owner 仍是守方原主
     src.units = src.units.filter(u => u.uid !== atkUnit.uid);
     dst.units.push(atkUnit);
     dst.owner = src.owner;
@@ -8983,11 +9019,8 @@ function importScenarioFile(input) {
       if (!j.name) throw new Error("no name");
       const id = "custom" + Math.floor(Math.random() * 90000 + 10000);
       j.factions = j.factions && j.factions.length ? j.factions : ORDER.slice();
-      SCENARIOS[id] = { name: j.name, desc: j.desc || "", factions: j.factions, icon: "", setup: j };
-      scenarioId = id;
-      renderScenarios();
-      updateSeats();
-      updateScenarioUI();
+      SCENARIOS[id] = { name: j.name, desc: j.desc || "", factions: j.factions, icon: "", custom: true, setup: j };
+      pickScenario(id); // 自定义剧本同样按剧本模式处理：收入 0.5、关闭桌游/中原逐鹿、刷新 UI
       if (editorMode) openEditor(); // 编辑器已开：重载导入的数据
       showToast("导入成功：" + j.name);
     } catch (err) {
@@ -9058,8 +9091,9 @@ function updateScenarioUI() {
   }
   // 胜利条件「遵循历史」：仅剧本模式可选；切回沙盒时若选中则重置为占领全部地块
   const wh = document.getElementById("win-history");
-  if (wh) wh.style.display = locked ? "" : "none";
-  if (!locked) {
+  const hasGoals = !!scenarioGoals(); // 无历史目标的剧本（如编辑器自定义）不能选「遵循历史」，否则永远无法结算
+  if (wh) wh.style.display = (locked && hasGoals) ? "" : "none";
+  if (!(locked && hasGoals)) {
     const hr = document.querySelector('input[name="win"][value="history"]');
     if (hr && hr.checked) {
       const landR = document.querySelector('input[name="win"][value="land"]');
@@ -10009,7 +10043,7 @@ function aiParseLine(line) {
   s = s.replace(/^\s*[-*\d.)、\s]+/, "").trim();
   if (!s) return null;
   const aliasCmd = function(pat) {
-    let m = s.match(pat); return m ? m.slice(1).map(function(x) { return x.trim(); }) : null;
+    let m = s.match(pat); return m ? m.slice(1).map(function(x) { return (x || "").trim(); }) : null;
   };
   let m;
   if ((m = aliasCmd(/(?:develop|提升发展度|发展)\s+(\S+)(?:\s+(\d+))?/i))) return { type:"develop", province: m[0], times: parseInt(m[1] || "0", 10) || 0 };
@@ -10086,8 +10120,10 @@ function parseAIDecision() {
   } else {
     const lines = raw.split(/\n/);
     for (const line of lines) {
-      const d = aiParseLine(line);
-      if (d) steps.push(d);
+      try {
+        const d = aiParseLine(line);
+        if (d) steps.push(d);
+      } catch (e) { console.warn("AI 文本决策行解析失败，已跳过：", line, e); } // 单行异常不拖垮整份清单
     }
   }
   if (!steps.length) {
