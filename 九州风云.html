@@ -2654,7 +2654,7 @@ function buildCity(pid) {
     }
   }
   if (s.city === 0) {
-    chronicleAdd(s.owner + " 在 " + provinceById[pid].name + " 建造城市（-" + cost + " 钱）");
+    chronicleAdd(displayName(s.owner) + " 在 " + provinceById[pid].name + " 建造城市（-" + cost + " 钱）");
   } else {
     chronicleAddUpgrade(s.owner, provinceById[pid].name, s.city, s.city + 1, cost);
   }
@@ -2787,7 +2787,7 @@ function buildBuilding(pid) {
   if (ps.treasury < def.cost) { showToast("国库不足"); return; }
   ps.treasury -= def.cost;
   SFX.build();
-  chronicleAdd(s.owner + " 在 " + prov.name + " 建造" + def.name + "（-" + def.cost + " 钱）");
+  chronicleAdd(displayName(s.owner) + " 在 " + prov.name + " 建造" + def.name + "（-" + def.cost + " 钱）");
   s.building = def.name;
   updateProvLabels();
   // 建造淡入动画
@@ -2903,7 +2903,7 @@ function debuffLines(f, power) {
   if (d.wubei && power >= wubeiNeed) {
     d.wubei = false;
     const wubeiTxt2 = wubeiName(f);
-    chronicleAdd(f + " 军力突破 " + wubeiNeed + "，" + wubeiTxt2 + "消除");
+    chronicleAdd(displayName(f) + " 军力突破 " + wubeiNeed + "，" + wubeiTxt2 + "消除");
     showToast(wubeiTxt2 + "已消除！");
   }
   const lines = [];
@@ -2997,10 +2997,10 @@ function nomadMoveCapital(pid) {
     ps.treasury = Math.min(TREASURY_CAP, ps.treasury + 20);
     st.building = "";
     bldgDestroyFx(prov);
-    chronicleAdd(f + " 迁都至行宫旧址，行宫被摧毁（+20 钱补偿）");
+    chronicleAdd(displayName(f) + " 迁都至行宫旧址，行宫被摧毁（+20 钱补偿）");
   }
   SFX.turn();
-  chronicleAdd(f + " 迁都至 " + prov.name);
+  chronicleAdd(displayName(f) + " 迁都至 " + prov.name);
   updateProvLabels();
   showProvinceInfo(prov);
   showToast(f + " 迁都至 " + prov.name + "（-5 钱）");
@@ -3973,7 +3973,7 @@ function boostDev(pid, lift) {
   if (ps.treasury < dc) { if (!aiBusy) showToast("国库不足"); return; } // AI 回合：国库不足临时取消（静默）
   ps.treasury = Math.round((ps.treasury - dc) * 100) / 100; // 取 2 位，防浮点噩梦
   SFX.build();
-  chronicleAdd(s.owner + " 在 " + provinceById[pid].name + " 提升发展度至 " + (s.dev + gain) + "（-" + dc + " 钱）");
+  chronicleAdd(displayName(s.owner) + " 在 " + provinceById[pid].name + " 提升发展度至 " + (s.dev + gain) + "（-" + dc + " 钱）");
   s.dev += gain;
   moneyFloat(-dc, provinceById[pid], "发展度 +" + gain, "#ffd700", lift); // 省份金色飘字（不弹 toast）
   recordReplayFrame(); // 读史：地块更新（发展度）
@@ -4366,10 +4366,13 @@ function fmtBattlePoint(dice, R) {
   }
   return s;
 }
+function escChronicleHtml(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 function openChronicle() {
   const el = document.getElementById("chronicle-list");
   if (!chronicle.length) el.innerHTML = "<div style='color:#999;padding:10px'>暂无记录</div>";
-  else el.innerHTML = chronicle.map((c) => c.indexOf("――") === 0 ? "<div style='color:#ffd700;text-align:center;margin:6px 0;letter-spacing:2px;font-weight:bold'>" + c + "</div>" : "<div class='cl'>" + splitDiplomacyHeader(c).replace(/\n/g, "<br>") + "</div>").join("");
+  else el.innerHTML = chronicle.map((c) => c.indexOf("――") === 0 ? "<div style='color:#ffd700;text-align:center;margin:6px 0;letter-spacing:2px;font-weight:bold'>" + escChronicleHtml(c) + "</div>" : "<div class='cl'>" + escChronicleHtml(splitDiplomacyHeader(c)).replace(/\n/g, "<br>") + "</div>").join("");
   document.getElementById("chronicle-modal").classList.remove("hidden");
 }
 function closeChronicle() { document.getElementById("chronicle-modal").classList.add("hidden"); }
@@ -4424,7 +4427,10 @@ function importReplayFile(input) {
       raw = rd.result;
       const MARK = "=====读史数据=====";
       let data;
-      if (raw.indexOf(MARK) >= 0) {
+      const _trim = raw.trim();
+      if (_trim.charAt(0) === "{") {
+        data = JSON.parse(_trim); // 纯 JSON 读史文件（优先判断，避免 title 含「九州风云 战报」被误当纯文本）
+      } else if (raw.indexOf(MARK) >= 0) {
         data = JSON.parse(raw.slice(raw.indexOf(MARK) + MARK.length)); // 带回放段：直接取 JSON
       } else if (raw.indexOf("九州风云 战报") >= 0) {
         data = parseReplayText(raw); // 纯文本史官：直接从记载解析
@@ -4469,6 +4475,15 @@ function enterReplay(data) {
   }
   renderReplayFrame(0);
 }
+function _replayUnitOffset(pid, nm, k) {
+  // 稳定伪随机偏移：同一兵跨帧位置一致，读史兵牌模式不再每帧乱跳
+  let h = 2166136261;
+  const s = String(pid) + "|" + nm + "|" + k;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const ang = ((h >>> 0) % 3600) / 3600 * Math.PI * 2;
+  const rad = 4 + ((Math.abs(h >> 8) % 1000) / 1000) * 18;
+  return { x: Math.cos(ang) * rad, y: Math.sin(ang) * rad };
+}
 function renderReplayFrame(i) {
   if (!replayFrames.length) return;
   replayIdx = Math.max(0, Math.min(replayFrames.length - 1, i));
@@ -4481,7 +4496,8 @@ function renderReplayFrame(i) {
     const units = [];
     for (const nm in d.u) for (let k = 0; k < d.u[nm]; k++) {
       const def = UNIT_DEFS[nm];
-      units.push({ name: nm, kind: def ? def.kind : "inf", uid: "rr" + (++_ruid), x: cx + (Math.random() * 24 - 12), y: cy + (Math.random() * 24 - 12) });
+      const _off = _replayUnitOffset(pid, nm, k);
+      units.push({ name: nm, kind: def ? def.kind : "inf", uid: "rr" + (++_ruid), x: cx + _off.x, y: cy + _off.y });
     }
     provState[pid] = { owner: d.o || null, city: d.c || 0, dev: d.d || 0, building: d.b || "", units: units };
   }
@@ -4507,7 +4523,7 @@ function renderReplayFrame(i) {
   const evEl = document.getElementById("replay-ev");
   if (evEl) {
     const _evHtml = (fr.t || []).filter(function(c) { return c.indexOf("战斗：") < 0 && c.indexOf("：国库") < 0; }).map(function(c) {
-      return c.indexOf("――") === 0 ? "<div style='color:#ffd700;font-weight:bold;margin:8px 0 4px;padding:3px 0;border-top:1px dashed rgba(255,215,0,.25);border-bottom:1px dashed rgba(255,215,0,.25);letter-spacing:1px'>" + c + "</div>" : "<div class='re'>" + c + "</div>";
+      return c.indexOf("――") === 0 ? "<div style='color:#ffd700;font-weight:bold;margin:8px 0 4px;padding:3px 0;border-top:1px dashed rgba(255,215,0,.25);border-bottom:1px dashed rgba(255,215,0,.25);letter-spacing:1px'>" + escChronicleHtml(c) + "</div>" : "<div class='re'>" + escChronicleHtml(c) + "</div>";
     }).join("");
     if (_evHtml) { _replayEvBuf = _evHtml; evEl.innerHTML = _evHtml; }
     else if (_replayEvBuf) evEl.innerHTML = _replayEvBuf; // 空帧：沿用上一句，不空白
@@ -4515,8 +4531,8 @@ function renderReplayFrame(i) {
   var _tl2 = document.getElementById("turn-label"); if (_tl2) _tl2.innerHTML = "第 " + fr.turn + " 回合";
 }
 // 纯文本史官解析：概况行重建每回合状态，事件行驱动地块/驻军变化
-let _atkPending = null; // 进攻行 → 战斗行之间的上下文
-let _lastWinner = null, _pending = null; // 战斗结果暂存/最后胜利者（顺势占领进驻；原为隐式全局，此处显式声明）
+let _atkPending = null; // 当前进攻序列（进攻行 → 战斗行/损失行 → 占领行）上下文
+let _lastWinner = null, _pending = null; // 最后胜利者（顺势占领进驻）；_pending 保留兼容
 function _provId(name) {
   const p = provByName(name);
   return p ? p.id : null;
@@ -4550,9 +4566,20 @@ function _oneUnit(spec) {
   const u = _unitSpec(spec)[0];
   return u ? u.name + "×1" : "";
 }
+function _takeUnit(pid, name) {
+  // 从地块取出一队该兵种（不存在则返回 false，避免凭空造兵）
+  if (pid === null) return false;
+  const s = _st[pid];
+  if (!s) return false;
+  const i = s.units.findIndex(function(x) { return x.name === name; });
+  if (i < 0) return false;
+  s.units.splice(i, 1);
+  return true;
+}
 function parseReplayText(raw) {
-  const lines = String(raw).split(/\r?\n/);
-  _st = {}; _pl = {}; _atkPending = null; _lastWinner = null; _pending = null; // 战斗结果暂存（损失行/旧文件兜底） // 最后胜利者（顺势占领时进驻目标）
+  const lines = String(raw).replace(/^\uFEFF/, "").split(/\r?\n/); // 去掉导出文件开头的 BOM，否则首行「九州风云 战报」会被当事件显示
+  _st = {}; _pl = {}; _atkPending = null; _lastWinner = null; _pending = null;
+  _replayCaps = {}; // 重新读史：清空上一份史料的迁都记录
   // 读史解析：先把全部陆地省份作为中立地块纳入状态，确保中立之间边界按浅色绘制
   for (const _p0 of DATA) {
     if (!_p0.is_land) continue;
@@ -4584,23 +4611,60 @@ function parseReplayText(raw) {
     const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] });
     s.owner = revName[f] || f; // 事件行里的 辽/金/清/元/夏 还原为原始势力 key
   }
+  function payCost(factionTxt, line) {
+    // 建造/招募/发展/升级都从国库扣钱：读史左上角国库要跟着走
+    const cm = line.match(/（-([\d.]+) 钱）/);
+    if (!cm) return;
+    const f = revName[factionTxt] || factionTxt;
+    const pst = _pl[f];
+    if (pst) pst.m = Math.round((pst.m - (parseFloat(cm[1]) || 0)) * 100) / 100;
+  }
+  function specCount(spec) {
+    const o = {};
+    if (!spec || spec === "无") return o;
+    for (const u of _unitSpec(spec)) o[u.name] = (o[u.name] || 0) + u.n;
+    return o;
+  }
+  // 战斗行里的兵种名（兼容旧格式「汉 步兵」的国家前缀）
+  function battleUnitName(txt) {
+    const parts = String(txt || "").trim().split(/\s+/);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+  // 旧文件无损失行时的规则兜底：按逐场战斗结果减员。不能每读到一条战斗行立即减员——
+  // 新格式是「多场战斗行 + 一条总损失行」，逐场预减会与总损失行叠加，导致驻军被减两遍。
+  function applyFallbackDamage() {
+    if (!_atkPending || _atkPending.lossHandled) return;
+    for (const d of (_atkPending.duels || [])) {
+      if (d.result === "攻方胜" && d.defUnit) _removeUnits(_atkPending.defPid, d.defUnit + "×1");
+      else if (d.result === "攻方败" && d.atkUnit) _removeUnits(_atkPending.srcPid, d.atkUnit + "×1");
+    }
+    _atkPending.lossHandled = true; // 本序列已结算（有损失行时精确减员，无损失行时按规则兜底）
+  }
+  function clearAttack() { _atkPending = null; _lastWinner = null; _pending = null; }
+  // 占领进驻：新格式取最后获胜的单位；旧格式（无逐场战斗行）从参战幸存者中取一队进驻
+  function transferLastKiller(dstPid) {
+    if (!_atkPending || _atkPending.srcPid === null || dstPid === null) return;
+    if (_lastWinner && _lastWinner.unit) {
+      if (_takeUnit(_atkPending.srcPid, _lastWinner.unit)) _addUnits(dstPid, _lastWinner.unit + "×1");
+      return;
+    }
+    if (!_atkPending.lossHandled || !_atkPending.atkSpec) return;
+    const survivors = specCount(_atkPending.atkSpec);
+    for (const nm in (_atkPending.atkLoss || {})) survivors[nm] = (survivors[nm] || 0) - _atkPending.atkLoss[nm];
+    const names = Object.keys(survivors).filter(function(n) { return survivors[n] > 0; });
+    if (!names.length) return;
+    // 攻击顺序 步兵→骑兵→远程：从后往前取仍有幸存者的兵种（旧文件无逐场明细，只能近似）
+    for (let i = names.length - 1; i >= 0; i--) {
+      if (_takeUnit(_atkPending.srcPid, names[i])) { _addUnits(dstPid, names[i] + "×1"); return; }
+    }
+  }
   for (const line of lines) {
     if (!line.trim()) continue;
-    // 旧文件兜底：战斗后无损失行 → 按结果规则减员（损失行/顺势占领不触发）
-    if (_pending && line.indexOf("损失：") < 0 && line.indexOf("顺势占领") < 0) {
-      if (_atkPending && _atkPending.lossHandled) {
-        // 损失行已合并统计过本次进攻序列：不再按单场结果重复减员
-        _pending = null;
-        if (line.indexOf(" 占领 ") < 0) { _atkPending = null; _lastWinner = null; } // 非进驻行：序列结束，清上下文防串场
-      } else {
-        if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
-        else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
-        else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
-        _atkPending = null; _pending = null;
-      }
-    }
     // 文件头/座位揭晓：不进入事件区（没人想看）
     if (line.indexOf("九州风云 战报") === 0 || line.indexOf("回合数：") === 0 || line.indexOf("生成时间：") === 0 || line.indexOf("---") === 0 || line.indexOf("随机揭晓") >= 0) continue;
+    // 是否仍处于「进攻 → 战斗行/损失行 → 占领行」序列；离开序列的行先结算兜底伤害并清理上下文
+    const inBattleSeq = line.indexOf("└ 战斗：") >= 0 || line.indexOf("损失：攻方 ") >= 0 || /^(.+?) (?:顺势)?占领 /.test(line);
+    if (!inBattleSeq && _atkPending) { applyFallbackDamage(); clearAttack(); }
     let m;
     // 回合头
     m = line.match(/――――― 第 (\d+) 回合 · (建造|行动) ―――――/);
@@ -4612,18 +4676,26 @@ function parseReplayText(raw) {
       if (revName[f]) f = revName[f];
       if (!_pl[f]) _pl[f] = { m: 0, e: false };
       _pl[f].m = parseFloat(m[2]) || 0;
-      // 以概况为准：先清空该势力所有地块
-      for (const pid in _st) if (_st[pid].owner === f) { _st[pid].owner = null; _st[pid].city = 0; _st[pid].dev = 0; _st[pid].building = ""; _st[pid].units = []; }
       const list = m[5].match(/[^、]+?Lv\d+\([^)]*\)/g) || []; // 按地块项匹配（括号内兵种的"、"不切断）
+      const listed = {};
       for (const item of list) {
         const pm = item.match(/^(.+?)Lv(\d+)\((.*?)\)$/);
         if (!pm) continue;
         const pid = _provId(pm[1]);
         if (pid === null) continue;
+        listed[pid] = { city: parseInt(pm[2]) || 0, units: pm[3] };
+      }
+      // 概况是归属/城市/驻军快照：未列出的旧地块视为已易主；发展度与建筑不在概况里，保留事件行累计值，
+      // 不能清零（否则每回合概况帧所有地块的发展度/建筑都被当成变化，读史满屏金边）
+      for (const pid in _st) {
+        if (_st[pid].owner !== f || listed[pid]) continue;
+        _st[pid].owner = null; _st[pid].city = 0; _st[pid].units = [];
+      }
+      for (const pid in listed) {
         const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] });
-        s.owner = f; s.city = parseInt(pm[2]) || 0;
+        s.owner = f; s.city = listed[pid].city;
         s.units = [];
-        if (pm[3] && pm[3] !== "无") _addUnits(pid, pm[3]);
+        if (listed[pid].units && listed[pid].units !== "无") _addUnits(pid, listed[pid].units);
       }
       evBuf.push(line);
       pendingSummary = true; // 同回合后续概况继续合并
@@ -4635,36 +4707,52 @@ function parseReplayText(raw) {
     evBuf.push(line);
     // 建造城市×N / 建造城市
     m = line.match(/^(.+?) 在 (.+?) 建造城市(?:×(\d+))?（-/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = Math.max(s.city || 0, 1); } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = Math.max(s.city || 0, 1); } payCost(m[1], line); pushFrame(); continue; }
     // 升级城市 LvA→LvB
     m = line.match(/^(.+?) 在 (.+?) 升级城市 Lv(\d+)→Lv(\d+)/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = parseInt(m[4]); } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = parseInt(m[4]); } payCost(m[1], line); pushFrame(); continue; }
     // 提升发展度×N
     m = line.match(/^(.+?) 在 (.+?) 提升发展度×(\d+)/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.dev = (s.dev || 0) + parseInt(m[3]); } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.dev = (s.dev || 0) + parseInt(m[3]); } payCost(m[1], line); pushFrame(); continue; }
     // 提升发展度至 N
     m = line.match(/^(.+?) 在 (.+?) 提升发展度至 (\d+)/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.dev = parseInt(m[3]); } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.dev = parseInt(m[3]); } payCost(m[1], line); pushFrame(); continue; }
     // 建造建筑
     m = line.match(/^(.+?) 在 (.+?) 建造(运河|市舶司|行宫)/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.building = m[3]; } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.building = m[3]; } payCost(m[1], line); pushFrame(); continue; }
     // 招募 兵种×N
     m = line.match(/^(.+?) 在 (.+?) 招募 (.+?)（-/);
-    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); _addUnits(pid, m[3]); } pushFrame(); continue; }
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); _addUnits(pid, m[3]); } payCost(m[1], line); pushFrame(); continue; }
+    // 招降：宋 招降 中立 江南（-20 钱） / 宋 招降 汉 江南（-20 钱）——地块与守军归顺
+    m = line.match(/^(.+?) 招降 (.+?)（-([\d.]+) 钱）$/);
+    if (m) {
+      const f = revName[m[1]] || m[1];
+      let provTxt = m[2];
+      if (provTxt.indexOf("中立 ") === 0) provTxt = provTxt.slice(3);
+      else { const sp = provTxt.indexOf(" "); if (sp >= 0) provTxt = provTxt.slice(sp + 1); }
+      const pid = _provId(provTxt);
+      if (pid !== null) {
+        own(pid, f); // 守军随地块归顺：不改变 units
+        const s = _st[pid];
+        if (s && s.building === "行宫") s.building = ""; // 招降同样摧毁行宫
+      }
+      const pst = _pl[f]; if (pst) pst.m = Math.round((pst.m - (parseFloat(m[3]) || 0)) * 100) / 100;
+      pushFrame(); continue;
+    }
     // 调动：宋 浙江（步兵×1）调动至 中立 江南 / 宋 江南（步兵×1）调动至 宋 浙江 / 旧格式无归属（被占）兼容
     m = line.match(/^(.+?) (.+?)（(.+?)）调动至 (?:(中立|.+?) )?(.+?)$/);
     if (m) {
-      _atkPending = null; _lastWinner = null; _pending = null; // 调动是非战斗事件：清理残留战斗上下文，防止后续「占领」行错误进驻
-      const srcPid = _provId(m[2]), dstPid = _provId(m[5]); // 修复：m[5] 是目标地块（原误用 m[4] 归属当地块查，目标永远不更新）
-      const dstOwner = m[4] ? (m[4] === "中立" ? m[1] : m[4]) : m[1]; // 无归属（旧被占格式）→ 调动方
+      const srcPid = _provId(m[2]), dstPid = _provId(m[5]);
+      // 「中立」保持无主，等紧随其后的占领行再变；有主目标维持原归属；旧格式无归属时按调动方兼容
+      const dstOwner = m[4] ? (m[4] === "中立" ? null : m[4]) : m[1];
       _removeUnits(srcPid, m[3]);
-      if (dstPid !== null) { own(dstPid, dstOwner); _addUnits(dstPid, m[3]); }
+      if (dstPid !== null) { if (dstOwner !== null) own(dstPid, dstOwner); _addUnits(dstPid, m[3]); }
       pushFrame(); continue;
     }
-    // 进攻：宋 浙江（步人甲×1）进攻 中立 福建（步兵1）——记录进攻上下文，战斗结果行按规则减员
+    // 进攻：宋 浙江（步人甲×1）进攻 中立 福建（步兵1）——记录进攻上下文
     m = line.match(/^(.+?) (.+?)（(.+?)）进攻 (?:中立|.+?) (.+?)（(.+?)）$/);
     if (m) {
-      _atkPending = { srcPid: _provId(m[2]), defPid: _provId(m[4]), atkSpec: m[3], defSpec: m[5], srcOwner: revName[m[1]] || m[1], lossHandled: false };
+      _atkPending = { srcPid: _provId(m[2]), defPid: _provId(m[4]), atkSpec: m[3], defSpec: m[5], srcOwner: revName[m[1]] || m[1], lossHandled: false, atkLoss: {}, defLoss: {}, duels: [] };
       // 进攻行自带双方兵力明细：若地块尚未记录（如中立守军），用明细初始化，战斗减员才有对象
       var _sp = _provId(m[2]);
       if (_sp !== null) { var _ss = _st[_sp] || (_st[_sp] = { owner: null, city: 0, dev: 0, building: "", units: [] }); if (!_ss.units.length) _addUnits(_sp, m[3]); }
@@ -4672,81 +4760,69 @@ function parseReplayText(raw) {
       if (_dp !== null) { var _ds = _st[_dp] || (_st[_dp] = { owner: null, city: 0, dev: 0, building: "", units: [] }); if (!_ds.units.length) _addUnits(_dp, m[5]); }
       pushFrame(); continue;
     }
-    // 战斗结果行：　└ 战斗：...——暂存结果（等损失行精确减员；旧文件无损失行则规则兜底）
-    m = line.match(/└ 战斗：.*?(攻方胜|攻方败|平局(?:·叛逃)?)/);
+    // 战斗结果行：　└ 战斗：...——记录逐场结果；有损失行时以损失行为准，无损失行时序列结束时规则兜底
+    m = line.match(/└ 战斗：.*?(攻方胜|攻方败|平局(?:[，·](?:守方)?叛逃)?)/);
     if (m && _atkPending) {
-      // 记录最后胜利者（战斗行已无国家名，攻方取 srcOwner）
-      var _wm = line.match(/└ 战斗：(.+?)(?: 【|$)/);
-      var _un = _wm ? _wm[1].split(" ").pop() : null; // 新格式"步兵" / 旧格式"汉 步兵" 兼容
-      if (_un) _lastWinner = { owner: _atkPending.srcOwner, unit: _un };
-      _pending = { result: m[1], atkSpec: _oneUnit(_atkPending.atkSpec), defSpec: _oneUnit(_atkPending.defSpec) }; // 暂存：损失行精确减员，旧文件规则兜底
-      pushFrame(); continue;
+      const um = line.match(/└ 战斗：(.+?) 【[^】]*】.*? vs (.+?) 【/);
+      const atkUnit = um ? battleUnitName(um[1]) : "";
+      const defUnit = um ? battleUnitName(um[2]) : "";
+      const result = m[1];
+      (_atkPending.duels = _atkPending.duels || []).push({ result: result, atkUnit: atkUnit, defUnit: defUnit });
+      if (result === "攻方胜" && atkUnit) _lastWinner = { owner: _atkPending.srcOwner, unit: atkUnit }; // 最后获胜者顺势进驻
+      _pending = { result: result, atkUnit: atkUnit, defUnit: defUnit }; // 兼容保留
+      // 绿营军「平局，守方叛逃」：守方单位归顺攻方（损失行不含叛逃者，需即时转移），单独成帧展示
+      if (result === "平局，守方叛逃" && defUnit) {
+        if (_takeUnit(_atkPending.defPid, defUnit)) _addUnits(_atkPending.srcPid, defUnit + "×1");
+        pushFrame(); continue;
+      }
+      // 普通战斗行不单独成帧：事件区本就过滤「战斗：」行，累计到损失行/占领行/下一个事件统一成帧
+      continue;
     }
-    // 损失行（新格式）：精确减员（兼容旧「　└ 损失」与新「损失」）
+    // 损失行：精确减员（兼容旧「　└ 损失」与新「损失」；单兵连击的损失行是累计值，可能先于后续战斗行出现）
     m = line.match(/[　 ]*└? *损失：攻方 (.+?)，守方 (.+)$/);
     if (m && _atkPending) {
       if (m[1] !== "无") _removeUnits(_atkPending.srcPid, m[1]);
       if (m[2] !== "无") _removeUnits(_atkPending.defPid, m[2]);
-      _atkPending.lossHandled = true; // 本次进攻序列已按损失行精确减员：后续战斗行不再兜底
-      _pending = null; // 保留 _atkPending 给顺势占领进驻
+      _atkPending.atkLoss = specCount(m[1]);
+      _atkPending.defLoss = specCount(m[2]);
+      _atkPending.lossHandled = true; // 已精确减员：序列内后续战斗行不再按单场规则重复减员
       pushFrame(); continue;
     }
-    // 绿营军：占领 X，收编一队步兵（攻占玩家地块赠步兵；新格式无「顺势占领」行，进驻在此完成）
+    // 绿营军：占领 X，收编一队步兵（攻占玩家地块赠步兵）
     m = line.match(/^(.+?) 占领 (.+?)，收编一队步兵$/);
     if (m) {
+      applyFallbackDamage(); // 旧文件无损失行：先按逐场结果兜底
       const pidFz = _provId(m[2]);
       if (pidFz !== null) {
         own(pidFz, m[1]);
         _addUnits(pidFz, "步兵×1"); // 收编步兵（本回合无法行动，读史只记兵力）
-        if (_lastWinner && _atkPending && _atkPending.srcPid !== null) { // 胜利者进驻
-          _removeUnits(_atkPending.srcPid, _lastWinner.unit + "×1");
-          _addUnits(pidFz, _lastWinner.unit + "×1");
-        }
-        _atkPending = null; _lastWinner = null;
+        transferLastKiller(pidFz);
       }
+      clearAttack();
       pushFrame(); continue;
     }
     // 普通占领 X（新格式，非收编）：进驻
     m = line.match(/^(.+?) 占领 (.+?)$/);
     if (m) {
+      applyFallbackDamage();
       const pidPt = _provId(m[2]);
-      if (pidPt !== null) {
-        own(pidPt, m[1]);
-        if (_lastWinner && _atkPending && _atkPending.srcPid !== null) {
-          _removeUnits(_atkPending.srcPid, _lastWinner.unit + "×1");
-          _addUnits(pidPt, _lastWinner.unit + "×1");
-        }
-        _atkPending = null; _lastWinner = null;
-      }
+      if (pidPt !== null) { own(pidPt, m[1]); transferLastKiller(pidPt); }
+      clearAttack();
       pushFrame(); continue;
     }
-    // 顺势占领 X
+    // 顺势占领 X（旧格式）
     m = line.match(/^(.+?) 顺势占领 (.+?)$/);
     if (m) {
-      if (_pending) { // 旧文件：规则减员在此兜底（保留 _atkPending 给进驻）
-        if (!(_atkPending && _atkPending.lossHandled)) {
-          if (_pending.result === "攻方胜") _removeUnits(_atkPending.defPid, _pending.defSpec);
-          else if (_pending.result === "攻方败") _removeUnits(_atkPending.srcPid, _pending.atkSpec);
-          else if (_pending.result === "平局·叛逃" || _pending.result === "平局，守方叛逃") { _removeUnits(_atkPending.defPid, _pending.defSpec); _addUnits(_atkPending.srcPid, _pending.defSpec); }
-        }
-        _pending = null;
-      }
+      applyFallbackDamage();
       const pid = _provId(m[2]);
-      if (pid !== null) {
-        own(pid, m[1]);
-        // 顺势占领：最后胜利者（攻方 1 兵）从源地块进驻目标
-        if (_lastWinner && _atkPending && _atkPending.srcPid !== null) {
-          _removeUnits(_atkPending.srcPid, _lastWinner.unit + "×1");
-          _addUnits(pid, _lastWinner.unit + "×1");
-        }
-      }
-      _atkPending = null; _lastWinner = null;
+      if (pid !== null) { own(pid, m[1]); transferLastKiller(pid); }
+      clearAttack();
       pushFrame(); continue;
     }
     // 王朝建立（女真→金 等进化：仅记录事件帧，归属名以概况为准）
     m = line.match(/^(.+?) 成立王朝$/);
     if (m) { pushFrame(); continue; }
-    // 外交支援：💛 宋 支援 汉 5 钱（更新国库）
+    // 外交支援：宋 支援 汉 5 钱（更新国库）
     m = line.match(/^.*?([\u4e00-\u9fa5]{1,4}) 支援 ([\u4e00-\u9fa5]{1,4}) ([\d.]+) 钱$/);
     if (m) { var _fa = revName[m[1]] || m[1], _fb = revName[m[2]] || m[2], _amt = parseFloat(m[3]) || 0; if (_pl[_fa]) _pl[_fa].m -= _amt; if (_pl[_fb]) _pl[_fb].m += _amt; pushFrame(); continue; }
     // 迁都：维护首都记录（首都加粗用）
@@ -4765,9 +4841,11 @@ function parseReplayText(raw) {
       }
       pushFrame(); continue;
     }
-    // 其他行（文件头/迁都/开战/条约等）：仅记录文本，不产生状态帧
+    // 其他行（文件头/开战/条约等）：仅记录文本，不产生状态帧
   }
+  if (_atkPending) { applyFallbackDamage(); clearAttack(); } // 文件在战斗序列中结束：先兜底结算
   if (pendingSummary) { pushFrame(); pendingSummary = false; } // 收尾：最后一组概况
+  if (evBuf.length) pushFrame(); // 收尾：不再有后续事件承接的最后若干行也成帧，避免详情丢失
   const seats = [];
   for (const f in _pl) seats.push({ name: "", type: "ai", f: f });
   return { type: "九州风云读史", version: 2, title: "九州风云 战报", seats: seats, frames: frames };
@@ -5269,7 +5347,7 @@ function recruitUnit(pid, name) {
   if (ps.treasury < realCost) { if (!aiBusy) showToast("国库不足"); return; } // AI 回合：国库不足临时取消（静默）
   ps.treasury -= realCost;
   SFX.build();
-  chronicleAdd(s.owner + " 在 " + provinceById[pid].name + " 招募 " + name + "（-" + realCost + " 钱）");
+  chronicleAdd(displayName(s.owner) + " 在 " + provinceById[pid].name + " 招募 " + name + "（-" + realCost + " 钱）");
   const prov = provinceById[pid];
   // 从地块中心出生，缓动走到随机位置
   const u = makeUnit(def.kind, name, prov.center[0], prov.center[1], s.owner);
