@@ -2,334 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><title>九州风云</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f5f0e8;color:#3d2b1f;overflow:hidden}
-.hidden{display:none!important}
-.map-only-hidden{display:none!important}
-.set-row{display:flex;align-items:center;gap:16px;margin:10px 0}
-.set-row.disabled{opacity:.45;pointer-events:none}
-.set-row label{font-size:16px;color:#4a2c1a;min-width:120px;text-align:right}
-.num{display:flex;gap:4px;align-items:center}
-.num button{width:34px;height:34px;border-radius:50%;border:2px solid #d4c4a8;background:#fff;font-size:16px;cursor:pointer;color:#4a2c1a;line-height:1}
-.num button:hover{border-color:#4a2c1a}
-.num .val{width:40px;text-align:center;font-size:18px;font-weight:bold;color:#4a2c1a}
-.win-opts{display:flex;gap:14px;font-size:15px;color:#4a2c1a;align-items:center}
-.sw-item{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;white-space:nowrap}
-.central-desc{font-size:12px;color:#8a7a60;white-space:normal;line-height:1.4;max-width:680px;font-weight:normal}
-.central-desc > span{display:block}
-.switch{position:relative;display:inline-block;width:42px;height:24px;flex:none}
-.switch input{opacity:0;width:0;height:0;position:absolute}
-.slider{position:absolute;inset:0;background:#c9bda6;border-radius:24px;transition:.2s}
-.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.switch input:checked + .slider{background:#4caf50}
-.switch input:disabled + .slider{background:#555;cursor:not-allowed;opacity:.45}
-.switch input:disabled + .slider:before{background:#888}
-.switch input:checked + .slider:before{transform:translateX(18px)}
-.win-opts input{width:14px;height:14px;margin-right:2px}
-#turn-timer { position:fixed; top:200px; left:50%; transform:translateX(-50%); color:#ffd700; font-size:15px; z-index:400; text-shadow:0 0 6px rgba(0,0,0,.9); font-weight:bold; letter-spacing:2px; }
-/* 自适应缩放锚点（2K/1080p scale=1 不变） */
-#players { transform-origin: top left; }
-#view-box { transform-origin: bottom right; }
-#turn-box, #save-box { transform-origin: bottom right; }
-#info { transform-origin: bottom left; }
-#toast { transform-origin: bottom center; }
-#battle-modal, #liao-modal { transform-origin: center center; }
-#turn-label, #turn-timer { transform-origin: top center; }
-.btn{font-size:18px;padding:14px 48px;border:none;border-radius:4px;cursor:pointer;font-family:inherit;color:#f5f0e8;background:#4a2c1a;letter-spacing:3px;transition:all .3s}
-.btn:hover{background:#6b4226}
-.btn:disabled{opacity:.4;pointer-events:none}
-
-#home{height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;background:linear-gradient(180deg,#faf6ef,#d4c4a8)}
-#home h1{font-size:80px;letter-spacing:20px;color:#4a2c1a;margin-bottom:12px;font-family:'STXingkai','华文行楷','Microsoft YaHei',cursive;font-weight:normal}
-#home .sub{font-size:18px;color:#8b7355;letter-spacing:6px;margin-bottom:64px;font-family:'STXingkai','华文行楷',cursive;font-weight:normal}
-#home .btn{font-family:'STXingkai','华文行楷',cursive;font-weight:normal;font-size:24px;letter-spacing:8px}
-
-.page{height:100vh;display:flex;flex-direction:column;align-items:center;background:linear-gradient(180deg,#faf6ef,#ede5d8);overflow-y:auto}
-.page h2{font-size:26px;color:#4a2c1a;letter-spacing:6px;padding:16px 0 8px}
-
-/* Setup */
-#setup{justify-content:flex-start}
-.seat-grid{display:flex;flex-direction:column;gap:8px;margin:6px 0}
-.set-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:3px 30px;width:680px;align-items:center;}
-.seat-row{display:grid;grid-template-columns:repeat(12,minmax(100px,1fr));gap:8px;justify-content:center;width:100%;max-width:1300px}
-.seat-row button{display:flex;align-items:center;justify-content:center;width:100%}
-/* 1920x1080 适配：窗口不足时 12 列换成 6 列两行，防止溢出 */
-@media (max-width:1380px){
-  .seat-row{grid-template-columns:repeat(6,minmax(100px,1fr));max-width:680px}
-}
-.sbtn{padding:10px 2px;border:2px solid #d4c4a8;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;color:#4a2c1a;font-family:inherit;transition:all .2s;text-align:center;white-space:nowrap;overflow:hidden}
-.sbtn:hover{border-color:#4a2c1a;background:#f5efe4}
-.sbtn.dim{opacity:.35;pointer-events:none}
-.sbtn.dimseat{opacity:.4}
-.sbtn.sel-h{border-color:#c62828;background:#c62828;color:#fff;opacity:1}
-.sbtn.sel-a{border-color:#1565c0;background:#1565c0;color:#fff;opacity:1}
-
-/* Pick */
-#pick-top{text-align:center;padding:20px 0 8px}
-#pick-top h2{font-size:22px;padding:0}
-#pick-top .turn{font-size:14px;color:#8b7355;margin-top:4px}
-#pick-main{flex:1;display:flex;align-items:flex-start;justify-content:center;gap:16px;padding:10px 30px 60px;min-height:0;width:100%;max-width:1100px}
-#pick-main .ar{font-size:36px;color:#8b7355;cursor:pointer;padding:12px 24px;user-select:none;margin-top:100px}
-#pick-main .ar:hover{color:#4a2c1a}
-#pick-show{flex:1;max-width:850px;text-align:center;padding-top:20px}
-.ci{font-size:56px}.cn{font-size:40px;font-weight:normal;color:#4a2c1a;font-family:'STXingkai','华文行楷',cursive}.cc{font-size:22px;color:#8b7355;margin:4px 0 6px;font-family:'STXingkai','华文行楷',cursive}.cq{font-size:22px;color:#6b4226;margin-bottom:10px;font-family:'STXingkai','华文行楷',cursive}
-.ct{display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-bottom:12px}
-.ct span{padding:6px 12px;border-radius:14px;font-size:16px;background:#4a2c1a;color:#f5f0e8}
-#pick-summary{display:flex;flex-direction:column;gap:10px;justify-content:center;align-items:center}
-.bk{width:100%;max-width:640px;min-height:80px;background:#fff;border-radius:6px;padding:14px 18px;border:1px solid #e0d5c5;text-align:left}
-.bk h3{font-size:17px;color:#8b7355;margin-bottom:8px}
-.bk ul{list-style:none;padding:0;margin:0}
-.bk li{font-size:15px;padding:3px 0;line-height:1.6}
-.tgs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:3px}
-.tgs span{padding:3px 9px;border-radius:3px;font-size:12px;background:#f0ebe0;border:1px solid #d4c4a8}
-.tgs span.hl{background:#4a2c1a;color:#f5f0e8}
-#pick-bar{display:flex;justify-content:center;gap:4px;padding:20px 30px 12px;flex-wrap:wrap}
-.bd{padding:8px 13px;border-radius:6px;cursor:pointer;font-size:14px;background:#e0d5c5;color:#8b7355;border:2px solid transparent;user-select:none}
-.bd:hover{background:#d0c0a8}
-.bd.ac{background:#fff;color:#4a2c1a;border-color:#4a2c1a;font-weight:bold}
-.bd.tk{opacity:.3;pointer-events:none}
-.bd.rand{background:linear-gradient(135deg,#f9e7b3,#e8c96a);color:#6b4226;border-color:#c4a32b;font-weight:bold}
-.bd.rand:hover{background:linear-gradient(135deg,#ffe9b8,#f0d57e);border-color:#8b6914}
-#pick-cf{text-align:center;padding:4px 0 30px}
-.evb{display:inline-block;padding:5px 12px;font-size:12px;background:linear-gradient(135deg,#c4a32b,#8b6914);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;letter-spacing:1px;transition:all .2s;margin:2px}
-.evb:hover{transform:scale(1.05)}
-#picked{position:fixed;top:16px;right:20px;background:rgba(255,255,255,.9);padding:12px 18px;border-radius:6px;border:1px solid #d4c4a8;font-size:16px;min-width:150px}
-#picked h4{font-size:17px;color:#4a2c1a;margin-bottom:6px}
-#picked div{padding:2px 0}
-@keyframes pf{0%{filter:brightness(2.5)}100%{filter:brightness(1)}}
-.pf{animation:pf .5s ease-out}
-#viewport { overflow:hidden; position:relative;}
-#box-sel{position:absolute;border:1.5px dashed rgba(255,215,0,.95);background:rgba(255,215,0,.08);pointer-events:none;z-index:80;display:none}
-#container { position:relative;} /* 无边框无阴影：3D canvas 直接铺满，不要“框框” */
-/* 3D 全屏模式下 UI 层级（container 脱离主页面 z-index:1，这些面板需在它之上；2D 模式无影响） */
-#players { z-index:590; } #info { z-index:650; }
-#players.compact6 .pl:nth-of-type(n+7) { display:none; }
-#toast, #turn-banner, #drag-line, #title { z-index:400; }
-#utip { z-index:500; }
-#battle-modal { z-index:700; }
-canvas { display:block; image-rendering:pixelated; image-rendering:crisp-edges;}
-#overlay { position:absolute; top:0; left:0; pointer-events:none;}
-#info { position:fixed; bottom:20px; left:20px; background:rgba(0,0,0,0.8); color:#fff; padding:14px 20px; border-radius:6px; font-size:14px; pointer-events:none; display:none; z-index:650; min-width:360px; border:1px solid rgba(255,215,0,0.3);}
-#players { position:fixed; top:16px; left:20px; background:rgba(0,0,0,.78); padding:12px 16px; border-radius:6px; border:1px solid rgba(255,215,0,.3); color:#eee; font-size:13px; z-index:590; min-width:230px; max-height:96vh; overflow-y:auto; }
-.sc-row { display:flex; gap:8px; margin:4px 0 8px; flex-wrap:wrap; justify-content:center; }
-#editor-bar { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:600; display:flex; align-items:center; gap:10px; background:rgba(20,14,8,.95); border:2px solid rgba(255,215,0,.5); border-radius:10px; padding:8px 14px; }
-.eb-title { color:#ffd700; font-size:16px; letter-spacing:2px; font-weight:bold; white-space:nowrap; }
-#ed-panel { position:fixed; right:24px; top:50%; transform:translateY(-50%); z-index:600; background:rgba(20,14,8,.95); border:2px solid rgba(255,215,0,.5); border-radius:10px; padding:14px 16px; width:230px; }
-#ed-prov-name { color:#ffd700; font-size:15px; margin-bottom:10px; letter-spacing:2px; border-bottom:1px solid rgba(255,215,0,.3); padding-bottom:6px; }
-#evo-modal { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:620; background:rgba(20,14,8,.98); border:2px solid rgba(255,215,0,.5); border-radius:12px; padding:16px 20px; width:min(760px,94vw); }
-#evo-modal h3 { color:#ffd700; text-align:center; letter-spacing:3px; margin:0 0 10px; }
-#editor-modal h3 { color:#ffd700; text-align:center; letter-spacing:4px; margin:0 0 10px; }
-.ed-meta { display:flex; gap:12px; align-items:center; margin-bottom:10px; color:#e8dcc8; font-size:14px; }
-.ed-in { background:#2a1e12; color:#ffd700; border:1px solid rgba(255,215,0,.35); border-radius:4px; padding:4px 8px; font-size:13px; font-family:inherit; }
-.ed-cap { color:#ffd700; font-size:15px; letter-spacing:3px; margin:12px 0 6px; border-bottom:1px solid rgba(255,215,0,.3); padding-bottom:4px; }
-.ed-table { max-height:300px; overflow-y:auto; border:1px solid rgba(255,215,0,.2); border-radius:6px; }
-.ed-mapwrap { display:flex; gap:12px; align-items:flex-start; }
-#ed-map { border:1px solid rgba(255,215,0,.3); border-radius:6px; background:#0e0a06; cursor:pointer; width:750px; max-width:100%; }
-.ed-form { flex:1; min-width:220px; background:rgba(255,215,0,.05); border:1px solid rgba(255,215,0,.25); border-radius:8px; padding:12px; }
-.ed-form-title { color:#ffd700; font-size:15px; margin-bottom:10px; letter-spacing:2px; }
-.ed-frow { display:flex; align-items:center; gap:8px; margin:7px 0; font-size:13px; color:#e8dcc8; }
-.ed-frow label { width:64px; flex:none; }
-.ed-frow select, .ed-frow input { flex:1; background:#2a1e12; color:#ffd700; border:1px solid rgba(255,215,0,.3); border-radius:4px; padding:4px 6px; font-size:13px; font-family:inherit; }
-.ed-army-title { color:#ffd700; font-size:13px; letter-spacing:2px; margin-top:4px; border-top:1px dashed rgba(255,215,0,.25); padding-top:6px; }
-.ed-row { display:flex; gap:8px; align-items:center; padding:3px 8px; font-size:13px; color:#e8dcc8; border-bottom:1px dashed rgba(255,215,0,.12); flex-wrap:wrap; row-gap:2px; }
-.ed-row:nth-child(even) { background:rgba(255,215,0,.04); }
-.ed-l { width:64px; color:#ffd700; flex:none; }
-.ed-row select, .ed-row input { background:#2a1e12; color:#ffd700; border:1px solid rgba(255,215,0,.3); border-radius:4px; padding:2px 6px; font-size:12px; font-family:inherit; }
-.ed-row input[type="number"] { width:56px; }
-.ed-row input[type="checkbox"] { width:16px; height:16px; }
-.ed-army { flex:1; min-width:120px; }
-.ed-unit { pointer-events:none; }
-.unit.cant-atk { opacity:.35 !important; filter:grayscale(1) !important; animation:none !important; }
-.bldg.masked { opacity:.3; filter:grayscale(1); }
-.sc-card { width:200px; border:2px solid #d4c4a8; border-radius:8px; background:#fff; padding:8px; cursor:pointer; text-align:center; transition:all .2s; box-shadow:0 1px 3px rgba(0,0,0,.08); }
-.sc-card:hover { border-color:#a08060; }
-.sc-card.ac { border-color:#c4a32b; background:#f3e5b8; box-shadow:0 1px 3px rgba(0,0,0,.08); }
-.sc-card img { width:100%; height:120px; object-fit:cover; border-radius:5px; display:block; }
-.sc-emoji { width:100%; height:120px; display:flex; align-items:center; justify-content:center; font-size:54px; background:rgba(255,215,0,.08); border-radius:5px; }
-.sc-name { color:#4a2c1a; font-size:16px; margin-top:7px; font-weight:bold; }
-.sc-desc { color:#8b7355; font-size:12px; margin-top:4px; line-height:1.4; }
-#loading-overlay { position:fixed; inset:0; z-index:900; background:#1a1410; display:flex; align-items:center; justify-content:center; }
-.lb-box { width:320px; text-align:center; }
-.lb-text { color:#ffd700; font-size:16px; letter-spacing:4px; margin-bottom:14px; }
-.lb-bar { height:8px; background:rgba(255,215,0,.15); border-radius:4px; overflow:hidden; }
-.lb-fill { height:100%; width:0%; background:linear-gradient(90deg,#b8860b,#ffd700); border-radius:4px; transition:width .1s linear; }
-.debuff { color:#ff8a7a; font-size:11px; line-height:1.5; margin-top:4px; border-top:1px dashed rgba(255,138,122,.3); padding-top:3px; }
-#players .ph { display:flex; justify-content:space-between; align-items:center; }
-#ui-tools { display:flex; gap:4px; margin-left:auto; margin-right:6px; }
-.utool { padding:1px 7px; font-size:11px; border:1px solid rgba(255,215,0,.4); border-radius:4px; background:rgba(0,0,0,.6); color:#ffd700; cursor:pointer; font-family:inherit; line-height:1.6; }
-.utool:hover { background:rgba(255,215,0,.25); }
-#players-toggle { background:rgba(255,215,0,.15); color:#ffd700; border:1px solid rgba(255,215,0,.4); border-radius:4px; width:24px; height:24px; cursor:pointer; font-size:16px; line-height:1; font-family:inherit; }
-#players-toggle:hover { background:rgba(255,215,0,.3); }
-#players-tab { position:fixed; top:16px; left:20px; width:40px; height:40px; border-radius:50%; background:rgba(0,0,0,.78); color:#ffd700; border:1px solid rgba(255,215,0,.4); cursor:pointer; font-size:16px; z-index:400; display:flex; align-items:center; justify-content:center; }
-#players-tab:hover { background:rgba(255,215,0,.2); }
-#players h4 { color:#ffd700; font-size:14px; margin-bottom:8px; letter-spacing:2px; }
-#players .pl { padding:4px 0 6px; border-bottom:1px solid rgba(255,255,255,.1); }
-#players .pl:last-child { border-bottom:none; }
-#players .pl .f { color:#ffd700; font-weight:bold; font-size:14px; }
-.give-btn { margin-left:6px; padding:1px 8px; font-size:11px; border:1px solid rgba(255,215,0,.4); border-radius:4px; background:rgba(0,0,0,.6); color:#ffd700; cursor:pointer; font-family:inherit; vertical-align:1px; }
-.give-btn:hover { background:rgba(255,215,0,.25); }
-.give-btn:disabled { opacity:.35; cursor:not-allowed; }
-.give-btn:disabled:hover { background:rgba(0,0,0,.6); }
-#players .pl.cur { background:rgba(255,215,0,.12); border-left:3px solid #ffd700; padding-left:8px; }
-#players .pl .st { color:#ccc; font-size:12px; line-height:1.7; }
-#players .pl .goal { color:#ffd9a0; font-size:11px; line-height:1.55; margin-top:3px; }
-#players .pl .goal .goal-t { color:#ffd700; }
-#players .pl.cur .goal { border:1px solid rgba(255,215,0,.35); border-radius:6px; padding:4px 6px; background:rgba(255,215,0,.08); }
-#goal-panel { margin:6px 0 2px; border:1px solid rgba(255,215,0,.35); border-radius:8px; padding:6px 8px; background:rgba(255,215,0,.06); }
-#goal-panel .goal { margin:0; }
-#goal-panel .goal-head { display:flex; justify-content:space-between; align-items:center; }
-.goal-next { padding:0 7px; font-size:11px; border:1px solid rgba(255,215,0,.4); border-radius:4px; background:rgba(0,0,0,.6); color:#ffd700; cursor:pointer; font-family:inherit; line-height:1.6; }
-.goal-next:hover { background:rgba(255,215,0,.25); }
-#turn-box { position:fixed; bottom:24px; right:24px; z-index:400; }
-#view-box { position:fixed; bottom:285px; right:24px; display:flex; flex-direction:column; gap:8px; z-index:400; }
-.vbtn { width:84px; padding:8px 0; text-align:center; border:1px solid rgba(255,215,0,.4); border-radius:4px; background:rgba(0,0,0,.7); color:#ddd; font-size:13px; cursor:pointer; font-family:inherit; transition:all .2s; }
-.vbtn:hover { color:#ffd700; }
-.vbtn:disabled { opacity:.4; pointer-events:none; }
-.vbtn.ac { background:rgba(255,215,0,.25); color:#ffd700; border-color:#ffd700; font-weight:bold; }
-#turn-label { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:400; color:#ffd700; font-size:19px; font-weight:bold; letter-spacing:3px; text-shadow:0 0 6px rgba(0,0,0,.8); line-height:1.8; text-align:center; background:rgba(0,0,0,.65); border:2px solid rgba(255,215,0,.45); border-radius:26px; padding:10px 36px; white-space:nowrap; }
-#turn-btn { width:84px; height:84px; font-size:46px; line-height:1; border:none; border-radius:14px; cursor:pointer; background:linear-gradient(135deg,#c4a32b,#8b6914); box-shadow:0 4px 14px rgba(0,0,0,.5); transition:all .2s; display:flex; align-items:center; justify-content:center; }
-#save-box { position:fixed; bottom:126px; right:24px; display:flex; flex-direction:column; gap:8px; z-index:400; }
-#save-box .sbtn { width:84px; padding:8px 0; }
-#chronicle-modal { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:500; background:rgba(20,14,8,.97); border:2px solid rgba(255,215,0,.45); border-radius:12px; padding:16px 20px; min-width:400px; max-width:800px; width:min(800px,94vw); }
-#chronicle-modal h3 { color:#ffd700; margin:0 0 10px; letter-spacing:3px; text-align:center; }
-#chronicle-list { max-height:55vh; overflow-y:auto; font-size:13px; line-height:1.7; color:#e8dcc8; }
-#chronicle-list .cl { padding:2px 0; border-bottom:1px dashed rgba(255,215,0,.15); }
-#chronicle-list .ci { color:#b8a888; }
-#gameover-modal { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:510; background:rgba(20,14,8,.98); border:2px solid rgba(255,215,0,.5); border-radius:12px; padding:16px 20px; width:960px; max-width:96vw; max-height:97vh; overflow-y:auto; }
-#gameover-modal h3 { color:#ffd700; text-align:center; letter-spacing:4px; margin:0 0 8px; font-size:20px; }
-#go-rank { font-size:12px; color:#e8dcc8; line-height:1.6; margin-bottom:8px; }
-#go-rank .r1 { color:#ffd700; font-weight:bold; }
-.go-chart { margin:8px 0; }
-.go-cap { color:#ffd700; font-size:12px; margin-bottom:3px; text-align:center; letter-spacing:2px; }
-#gameover-modal canvas { background:#0e0a06; border:1px solid rgba(255,215,0,.25); border-radius:6px; display:block; width:100%; height:auto; max-width:900px; }
-.cm-btns { display:flex; justify-content:center; gap:10px; margin-top:12px; }
-#go-continue { margin-left:auto; }
-#go-close { margin-left:auto; }
-.sbtn { padding:8px 14px; text-align:center; border:1px solid rgba(255,215,0,.4); border-radius:6px; background:rgba(0,0,0,.75); color:#ffd700; font-size:14px; cursor:pointer; font-family:inherit; transition:all .2s; }
-.sbtn:hover { background:rgba(255,215,0,.2); }
-.sbtn:disabled { opacity:.3; cursor:not-allowed; }
-#turn-btn:hover { transform:scale(1.08); box-shadow:0 6px 18px rgba(0,0,0,.6); }
-#info.show { display:block;}
-#info .name { font-size:20px; font-weight:bold; color:#ffd700; display:block; margin-bottom:4px;}
-#info .detail { color:#ccc; font-size:13px; line-height:1.6;}
-#info .detail .pinfo-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:4px 8px; margin:2px 0 6px; }
-#info .detail .pg { display:flex; align-items:baseline; gap:4px; background:rgba(255,255,255,0.07); border-radius:4px; padding:2px 6px; white-space:nowrap; overflow:hidden; }
-#info .detail .pg-lb { color:#b8a888; font-size:11px; }
-#info .detail .pg-v { color:#fff; font-size:12px; }
-#title { position:absolute; top:8px; right:15px; color:rgba(255,255,255,0.3); font-weight:bold; pointer-events:none; letter-spacing:4px; z-index:100;}
-.prov-label { position:absolute; transform:translate(-50%,-50%); pointer-events:none; font-weight:bold; text-align:center; line-height:1.2; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; color:#fff; z-index:10; /* 高于 3D canvas(z0) 防被盖；低于单位(z100+)/建筑(z140) */}
-.prov-label .army-line { font-size:0.72em; font-weight:normal; color:#ffd700; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
-#cross-arrows svg { opacity:0.55; z-index:1; } /* 箭头半透明 */
-.prov-label .plv { color:#ffd700; font-size:0.72em; font-weight:bold; margin-left:3px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
-.prov-label .pname.cap { color:#f5e6a8; font-weight:bold; font-size:1.15em; }
-#map-page{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#1a1a2e;display:flex;justify-content:center;align-items:center;overflow:hidden}
-
-/* 拖拽单位 */
-.unit { position:absolute; transform:translate(-50%,-50%); pointer-events:auto; cursor:grab; user-select:none; line-height:1; z-index:150; font-size:13px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 4px #000; }
-.unit.sel-dim { opacity:.35; filter:grayscale(.6); } /* 框选：同地块未选中的兵暗色 */
-.bldg { position:absolute; transform:translate(-50%,-50%); font-size:21px; z-index:140; pointer-events:none; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 5px #000; }
-.bldg-in { animation: bldgFadeIn .9s ease-out; }
-@keyframes bldgFadeIn { 0% { opacity:0; transform:translate(-50%,-50%) scale(1.7); } 60% { opacity:1; transform:translate(-50%,-50%) scale(.94); } 100% { opacity:1; transform:translate(-50%,-50%) scale(1); } }
-.bldg-dying { position:absolute; pointer-events:none; z-index:230; font-size:26px; animation: bldgDestroyFx .8s ease-out forwards; }
-@keyframes bldgDestroyFx { 0% { opacity:1; transform:translate(-50%,-50%) scale(.7); filter:none; } 30% { opacity:1; transform:translate(-50%,-50%) scale(1.7); filter:brightness(2) saturate(2); } 100% { opacity:0; transform:translate(-50%,-50%) scale(.1) rotate(30deg); filter:brightness(3); } }
-.unit.dragging { opacity:.45; }
-.unit.aim { z-index:260; filter:drop-shadow(0 0 6px #ff3b3b) drop-shadow(0 0 14px #ff3b3b); }
-.unit.spent { opacity:.35; filter:grayscale(1); }
-.unit.atkonly { opacity:.5; filter:grayscale(1); animation: atkOnlyBlink 1.2s ease-in-out infinite; }
-@keyframes atkOnlyBlink { 0%,100% { opacity:.5; } 50% { opacity:.85; } }
-.unit.spec {
-  color:#ffd700;
-  filter: drop-shadow(0 0 3px rgba(255,215,0,.8)) drop-shadow(0 0 8px rgba(255,180,0,.5));
-}
-
-.unit.spent:not(.atkonly) { animation:none; }
-#recruit-area { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,215,0,.25); display:none; text-align:left; }
-#recruit-area .ra-title { color:#ffd700; font-size:15px; margin-bottom:6px; }
-#build-area { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,215,0,.25); display:none; text-align:left; }
-#build-area .ra-title { color:#ffd700; font-size:15px; margin-bottom:6px; }
-#evo-area { margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,215,0,.25); display:none; }
-#evo-area .ra-title { color:#ffd700; font-size:13px; margin-bottom:4px; line-height:1.5; }
-.rbtn { display:flex; justify-content:space-between; align-items:center; width:100%; margin:4px 0; padding:6px 10px; background:#3a2a18; color:#ffd700; border:1px solid rgba(255,215,0,.4); border-radius:4px; cursor:pointer; font-size:13px; font-family:inherit; text-align:left; }
-.rbtn .bn { display:flex; align-items:center; }
-.rbtn .bp { color:#ffd700; white-space:nowrap; }
-.rbtn .w { font-style:normal; color:#ff8a8a; font-size:11px; margin-left:6px; }
-.rbtn:hover { background:#5a4028; }
-.rbtn.off { opacity:.4; cursor:not-allowed; }
-.rbtn.ac { background:#5a4028; border-color:#ffd700; color:#fff; }
-#info { pointer-events:none; }
-#recruit-area, #recruit-area .rbtn { pointer-events:auto; }
-#build-area, #build-area .rbtn { pointer-events:auto; }
-#utip { position:fixed; background:rgba(20,16,10,.95); border:1px solid rgba(255,215,0,.5); border-radius:6px; padding:10px 14px; color:#eee; font-size:12px; z-index:700; display:none; pointer-events:none; max-width:340px; box-shadow:0 4px 16px rgba(0,0,0,.6); }
-#turn-banner { position:fixed; top:38%; left:50%; transform:translate(-50%,-50%); font-size:54px; font-weight:bold; color:#ffd700; letter-spacing:10px; text-shadow:0 0 20px rgba(255,215,0,.8), 0 0 45px rgba(255,215,0,.4); opacity:0; pointer-events:none; z-index:800; white-space:nowrap; }
-#turn-banner.show { animation: turnBanner 1.8s ease-out forwards; }
-@keyframes turnBanner { 0% { opacity:0; transform:translate(-50%,-50%) scale(1.35); } 15% { opacity:1; transform:translate(-50%,-50%) scale(1); } 70% { opacity:1; } 100% { opacity:0; transform:translate(-50%,-50%) scale(.96); } }
-.money-float { position:absolute; transform:translate(-50%,-50%); font-size:30px; font-weight:bold; color:#ffd700; text-shadow:0 0 12px rgba(0,0,0,.85); pointer-events:none; z-index:850; animation: moneyFloat 1s ease-out forwards; }
-.money-float.red { color:#ff6b6b; }
-@keyframes moneyFloat { 0% { opacity:0; transform:translate(-50%,-50%) translateY(12px); } 20% { opacity:1; } 100% { opacity:0; transform:translate(-50%,-50%) translateY(-45px); } }
-#evo-flash { position:fixed; inset:0; pointer-events:none; z-index:860; background:radial-gradient(circle, rgba(255,215,0,.5), rgba(255,180,0,.18) 50%, transparent 75%); opacity:0; }
-#evo-flash.show { animation: evoFlash 1.3s ease-out; }
-@keyframes evoFlash { 0% { opacity:0; } 25% { opacity:1; } 100% { opacity:0; } }
-.plv { display:inline-block; }
-.plv.flash { animation: lvFlash .8s ease-out; }
-@keyframes lvFlash { 0% { transform:scale(1.9); color:#fff; } 100% { transform:scale(1); } }
-#utip .ut-name { color:#ffd700; font-size:15px; font-weight:bold; margin-bottom:4px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
-#utip .ut-type { color:#bbb; font-size:11px; font-weight:normal; margin-left:6px; }
-#utip .ut-name .ut-state { color:#6bff8a; font-size:11px; font-weight:bold; margin-left:auto; }
-#utip .ut-line { color:#ccc; margin:3px 0; }
-#utip .ut-state { margin:3px 0; font-size:12px; }
-#utip .ut-state .ok { color:#6bff8a; font-weight:bold; }
-#utip .ut-props { margin-top:6px; border-top:1px solid rgba(255,255,255,.15); padding-top:6px; }
-#utip .ut-prop { color:#ffd9a0; line-height:1.6; }
-.unit.hl { filter: drop-shadow(0 0 6px #ffd700); }
-.unit.dim2 { opacity:.28; }
-.dice { position:absolute; transform:translate(-50%,-50%); font-size:34px; z-index:300; pointer-events:none; width:54px; height:54px; display:flex; align-items:center; justify-content:center; background:#f5f0e8; border:3px solid #ffd700; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.6); animation:dicePop .25s ease-out; }
-.unit.dying { animation: unitDeath .45s ease-in forwards; }
-@keyframes unitDeath {
-  0% { opacity:1; }
-  100% { opacity:0; }
-}
-.capture { position:absolute; transform:translate(-50%,-50%); font-size:40px; z-index:300; pointer-events:none; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 6px #000; animation:capturePop .9s ease-out forwards; }
-@keyframes capturePop {
-  0% { transform:translate(-50%,-50%) scale(.3) rotate(-20deg); opacity:0; }
-  25% { transform:translate(-50%,-50%) scale(1.5) rotate(8deg); opacity:1; }
-  60% { transform:translate(-50%,-50%) scale(1) rotate(0deg); opacity:1; }
-  100% { transform:translate(-50%,-50%) scale(.7) rotate(0deg); opacity:0; }
-}
-@keyframes dicePop { from { transform:translate(-50%,-50%) scale(1.8); opacity:.2; } to { transform:translate(-50%,-50%) scale(1); opacity:1; } }
-.dice.flash { animation: diceFlash .38s ease-out; }
-@keyframes diceFlash { 0% { filter:brightness(3.2); transform:translate(-50%,-50%) scale(1.5); } 100% { filter:brightness(1); transform:translate(-50%,-50%) scale(1); } }
-#drag-line { position:absolute; top:0; left:0; height:4px; background:#ffd700; transform-origin:0 50%; pointer-events:none; display:none; z-index:200; box-shadow:0 0 5px rgba(255,215,0,.8); }
-#drag-line::after { content:""; position:absolute; right:-18px; top:50%; transform:translateY(-50%); width:0; height:0; border-left:18px solid #ffd700; border-top:10px solid transparent; border-bottom:10px solid transparent; filter:drop-shadow(0 0 4px rgba(255,215,0,.9)); }
-/* 战斗模态框 */
-#battle-modal, #joint-modal { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,.55); display:flex; justify-content:center; align-items:center; z-index:500; }
-#battle-box, #liao-box, #joint-box { background:#2a2a3e; border:2px solid #ffd700; border-radius:8px; padding:24px 32px; min-width:340px; max-width:520px; color:#eee; text-align:center; box-shadow:0 0 30px rgba(0,0,0,.6); }
-#joint-box { max-width:760px; } /* 联合预演：兵种卡横排需要更宽 */
-#battle-box h3, #joint-box h3 { color:#ffd700; margin-bottom:12px; font-size:20px; letter-spacing:2px; }
-#battle-box .bbody, #joint-box .bbody { font-size:15px; line-height:1.9; margin-bottom:16px; white-space:pre-line; }
-#battle-box .bbody .big { font-size:22px; font-weight:bold; }
-#battle-box .bbody .gold { color:#ffd700; }
-#battle-box .bbody .red { color:#ff6b6b; }
-#battle-box .bbody .green { color:#6bff8a; }
-.bbtn { padding:8px 28px; margin:0 8px; border:none; border-radius:4px; font-size:15px; cursor:pointer; font-family:inherit; }
-#battle-yes { background:#c4a32b; color:#fff; }
-#battle-no { background:#666; color:#fff; }
-#battle-ok { background:#c4a32b; color:#fff; }
-/* 联合进攻预演弹窗：兵种卡横排同高度 */
-.jm-row { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:6px 0 12px; }
-.jm-card { border:1px solid rgba(255,215,0,.35); border-radius:6px; padding:8px 12px; min-width:110px; text-align:center; background:rgba(255,255,255,.05); }
-.jm-name { font-size:15px; color:#ffd700; margin-bottom:4px; }
-.jm-line { font-size:12px; color:#ccc; line-height:1.7; }
-.jm-side { font-size:13px; color:#aaa; margin:4px 0 2px; }
-/* 战争胶囊：两国首次开战提示 */
-/* 胶囊堆叠：多胶囊共存（占领/灭亡各自独立，弹入→停留→淡出，不阻塞操作） */
-#capsule-stack { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; z-index:610; pointer-events:none; }
-.capsule { background:rgba(70,70,70,.92); color:#ffffff; padding:10px 30px; border-radius:50px; font-size:22px; font-weight:bold; border:2px solid rgba(160,160,160,.5); box-shadow:0 2px 16px rgba(0,0,0,.35); white-space:nowrap; letter-spacing:2px; animation:capsuleIn .25s ease-out; }
-@keyframes capsuleIn { from { opacity:0; transform:translateY(14px) scale(.92); } to { opacity:1; transform:translateY(0) scale(1); } }
-/* toast */
-#toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.85); color:#ffd700; padding:10px 22px; border-radius:6px; font-size:15px; z-index:600; display:none; pointer-events:none; border:1px solid rgba(255,215,0,.4); }
-
-*{margin:0;padding:0;box-sizing:border-box}
+<style>*{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f5f0e8;color:#3d2b1f;overflow:hidden}
 .hidden{display:none!important}
 .map-only-hidden{display:none!important}
@@ -744,6 +417,10 @@ html, body { height:100%; overscroll-behavior:none; }
   #editor-bar { top:10px; width:calc(100vw - 20px); overflow-x:auto; }
   #evo-modal { width:min(94vw,760px); }
 }
+.switch input:disabled + .slider{background:#555;cursor:not-allowed;opacity:.45}
+.switch input:disabled + .slider:before{background:#888}
+#box-sel{position:absolute;border:1.5px dashed rgba(255,215,0,.95);background:rgba(255,215,0,.08);pointer-events:none;z-index:80;display:none}
+.unit.sel-dim { opacity:.35; filter:grayscale(.6); } /* 框选：同地块未选中的兵暗色 */
 </style>
 <script>
 /**
@@ -2509,6 +2186,7 @@ function startPhase(p, silent) {
       if (!f || eliminated[f]) continue;
       chronicle.push(factionSummaryLine(f));
     }
+    if (neutralRefreshLog.length) { chronicleAdd("中立 刷新：" + neutralRefreshLog.join("、")); neutralRefreshLog = []; } // 中立刷兵入史官
   }
   // 自动围圈已取消（行动阶段不再自动围圈）
   recordReplayFrame(); // 读史：记录本阶段快照帧
@@ -2555,7 +2233,7 @@ function nextTurn() {
       mi++;
     }
     recordTurnStats(netMap); // 本回合统计点
-    if (winCond === "history") checkGoals(); // 收入/存活类目标判定
+  if (winCond === "history") checkGoals(); // 收入/存活类目标判定
     updateInfoTreasury(); // 收入结算后国库实时更新
     prevWars = curWars; curWars = {}; // 上回合战争关系轮换
     // 宿命对决：场上只剩两家且 10 回合后 → 关系立刻降低 100（归零，两强相遇必有一战）
@@ -2609,6 +2287,7 @@ function isCoastal(prov) {
 // 建造/升级城市：0→1 建城 20 钱，之后统一 20 钱（游牧建城+5），市舶司 -10，最高 4 级
 // 死亡地块记录：本回合死过人的地块，下回合开始不刷中立兵
 let diedThisTurn = new Set(), diedLastTurn = new Set();
+let neutralRefreshLog = []; // 本轮中立刷兵明细：下一回合概况处以可读文字入史官
 // 中立地块刷兵（animate=true 时带移动动画；开局静默摆放）
 function spawnNeutral(animate) {
   for (const p of DATA) {
@@ -2618,6 +2297,7 @@ function spawnNeutral(animate) {
     if (s && !s.owner && p.is_land && armyCount(s) < capEff) {
       const nu = makeUnit("inf", "步兵", p.center[0], p.center[1]);
       s.units.push(nu);
+      neutralRefreshLog.push(p.name + " 步兵×1");
       const np = randPosInProv(p);
       if (animate) animateUnitMove(nu, np.x, np.y, 420, null, p.bounds);
       else { nu.x = np.x; nu.y = np.y; } // 开局直接摆放
@@ -2905,6 +2585,7 @@ function debuffLines(f, power) {
     const wubeiTxt2 = wubeiName(f);
     chronicleAdd(displayName(f) + " 军力突破 " + wubeiNeed + "，" + wubeiTxt2 + "消除");
     showToast(wubeiTxt2 + "已消除！");
+    recordReplayFrame(); // 读史：武备废弛消除（debuff 变化）后补一帧
   }
   const lines = [];
   const wubeiTxt = wubeiName(f); // 武备废弛按剧本/势力专属名（效果一致）
@@ -2984,10 +2665,11 @@ function nomadMoveCapital(pid) {
   ps.treasury -= 5;
   nomadMoved[f] = true;
   // 旧首都转移 1 级城市等级至新首都：新都已满级/旧都无级时不转移（双方等级守恒）
+  let _nmOldLv = -1; const _nmNewLv = st.city;
   for (const p of DATA) {
     if (p.name === oldCap) {
       const os = provState[p.id];
-      if (os && os.city > 0 && st.city < 4) { os.city--; st.city++; }
+      if (os && os.city > 0 && st.city < 4) { os.city--; st.city++; _nmOldLv = os.city; }
       break;
     }
   }
@@ -3000,7 +2682,9 @@ function nomadMoveCapital(pid) {
     chronicleAdd(displayName(f) + " 迁都至行宫旧址，行宫被摧毁（+20 钱补偿）");
   }
   SFX.turn();
-  chronicleAdd(displayName(f) + " 迁都至 " + prov.name);
+  chronicleAdd(displayName(f) + " 迁都至 " + prov.name + "（-5 钱）");
+  if (_nmOldLv >= 0) chronicleAdd(displayName(f) + " 在 " + oldCap + " 城市降低至 Lv" + _nmOldLv + "（迁都）");
+  if (st.city > _nmNewLv) chronicleAdd(displayName(f) + " 在 " + prov.name + " 升级城市 Lv" + _nmNewLv + "→Lv" + st.city + "（迁都）");
   updateProvLabels();
   showProvinceInfo(prov);
   showToast(f + " 迁都至 " + prov.name + "（-5 钱）");
@@ -3060,8 +2744,8 @@ function evolveFaction(f, branch) {
     if (p.name === cap) {
       const s = provState[p.id];
       if (s && s.owner === f) { // 首都可能已被攻陷（挂起迁都）：只升级仍属于己方的首都，防给敌方城市升级
-        if (s.city < 4) s.city++;
-        if (f === "党项") s.dev = Math.min(200, (s.dev || 0) + 20); // 定难节度进化：首都+20发展度（上限200）
+        if (s.city < 4) { const _evOldLv = s.city; s.city++; chronicleAdd(displayName(f) + " 在 " + cap + " 升级城市 Lv" + _evOldLv + "→Lv" + s.city + "（王朝建立）"); }
+        if (f === "党项") { s.dev = Math.min(200, (s.dev || 0) + 20); chronicleAdd(displayName(f) + " 在 " + cap + " 提升发展度至 " + s.dev + "（王朝建立）"); } // 定难节度进化：首都+20发展度（上限200）
       }
       break;
     }
@@ -3742,6 +3426,7 @@ canvas.addEventListener("pointerdown", function(e) {
         if (aiPaused) aiPaused = false; // 恢复被冻结的 AI 回合（继续剩余行动）
         updateProvLabels();
         applyOwnerColors();
+        recordReplayFrame(); // 读史：人类强制迁都后记录状态帧（首都/国库/行宫变化）
         return;
       }
     }
@@ -4256,7 +3941,7 @@ function factionSummaryLine(f) {
     const s = provState[p.id];
     if (s && s.owner === f) {
       for (const u of s.units) troops += unitCostOf(u); // 军力 = 招募原价总和（不按折扣）
-      provs.push(p.name + "Lv" + (s.city || 0) + "(" + describeUnits(s.units) + ")");
+      provs.push(p.name + "Lv" + (s.city || 0) + "(" + describeUnits(s.units) + "，发展" + (s.dev || 0) + (s.building ? "，" + s.building : "") + ")");
     }
   }
   const treas = playerState[f] ? Math.round(playerState[f].treasury * 100) / 100 : 0; // 国库
@@ -4264,7 +3949,15 @@ function factionSummaryLine(f) {
   const tr = (calcTransfers())[f] || { in: 0, out: 0 };
   const net = Math.round((tr.in - tr.out) * 100) / 100;
   const trTxt = net !== 0 ? "　外交 " + (net > 0 ? "+" : "") + net : "";
-  return displayName(f) + "：国库 " + treas + "　收入 " + inc + trTxt + "　军力 " + troops + "　占 " + provs.join("、");
+  const _d = debuffState[f];
+  const _dbt = [];
+  if (_d) {
+    if (_d.chanyuan) _dbt.push("澶渊之盟");
+    if (_d.ronguan) _dbt.push((scenarioId === "jiashen" ? "党争" : "冗官") + (_d.rgCount || 0) + "/10");
+    if (_d.wubei) _dbt.push(wubeiName(f));
+  }
+  const dbtTxt = _dbt.length ? "　状态 " + _dbt.join("、") : "";
+  return displayName(f) + "：国库 " + treas + "　收入 " + inc + trTxt + "　军力 " + troops + dbtTxt + "　占 " + provs.join("、");
 }
 // 兵种明细：步兵×2、骑兵×1、回回炮×3（无兵显示「无」）
 function describeUnits(units) {
@@ -4395,6 +4088,8 @@ let replayDiffPids = []; // 当前帧 vs 上一帧的变动地块（2D 描边 / 
 let _st = {}, _pl = {}; // 文本解析器的临时状态
 let _ruid = 0; // 读史虚拟单位 uid 计数
 let _replayCaps = {}; // 读史迁都记录（首都加粗用）
+let replayFullState = false; // 本次读史是否带发展度/建筑/状态（新格式文本或 JSON）
+let _preReplayMeta = null; // 进入读史前的国号/首都/减益快照（退出时恢复，防泄漏到下一局）
 function recordReplayFrame() {
   const st = {}, pl = {};
   for (const p of DATA) {
@@ -4406,12 +4101,19 @@ function recordReplayFrame() {
     st[p.id] = { o: s.owner || "", c: s.city || 0, d: s.dev || 0, b: s.building || "", u: u };
   }
   for (const f in playerState) pl[f] = { m: Math.round(playerState[f].treasury * 100) / 100, e: !!eliminated[f] };
-  replayFrames.push({ turn: currentTurn, phase: gamePhase, t: chronicle.slice(chronicleMark), st: st, pl: pl });
+  // 读史帧附带势力元数据：国号进化/首都/剧本减益，回放逐帧恢复（否则导入时这些全局状态是空的）
+  const ex = { ev: {}, cap: {}, deb: {} };
+  for (const f in playerState) {
+    ex.ev[f] = evolved[f] || "";
+    ex.cap[f] = mutableCapital[f] || CAPITAL_MAP[f] || "";
+    ex.deb[f] = debuffState[f] ? JSON.parse(JSON.stringify(debuffState[f])) : null;
+  }
+  replayFrames.push({ turn: currentTurn, phase: gamePhase, t: chronicle.slice(chronicleMark), st: st, pl: pl, ex: ex });
   chronicleMark = chronicle.length;
 }
 function buildReplayData() {
   return {
-    type: "九州风云读史", version: 1,
+    type: "九州风云读史", version: 2, fullState: true,
     title: "九州风云 战报", turns: currentTurn, time: new Date().toLocaleString(),
     seats: pickOrder.map(function(po, i) { return { name: po ? po.name : "", type: po ? po.type : "", f: picks[i] || "" }; }),
     frames: replayFrames
@@ -4449,9 +4151,11 @@ function importReplayFile(input) {
 function enterReplay(data) {
   replayData = data;
   replayFrames = data.frames;
+  replayFullState = !!data.fullState;
   replayIdx = 0;
   if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
   replayMode = true;
+  _preReplayMeta = { ev: JSON.parse(JSON.stringify(evolved)), cap: JSON.parse(JSON.stringify(mutableCapital)), deb: JSON.parse(JSON.stringify(debuffState)) };
   document.getElementById("home").classList.add("hidden");
   document.getElementById("setup").classList.add("hidden");
   document.getElementById("map-page").classList.remove("hidden");
@@ -4514,6 +4218,12 @@ function renderReplayFrame(i) {
       playerState[s0.f] = { treasury: 0, name: seatName[s0.f] || "" };
       if (eliminated[s0.f] === undefined) eliminated[s0.f] = false;
     }
+  }
+  // 逐帧恢复读史元数据：国号进化/首都/减益（文本读史与 JSON 读史都带 ex）
+  if (fr.ex) {
+    for (const f in fr.ex.ev) { if (fr.ex.ev[f]) evolved[f] = fr.ex.ev[f]; else delete evolved[f]; }
+    for (const f in fr.ex.cap) { if (fr.ex.cap[f]) mutableCapital[f] = fr.ex.cap[f]; }
+    for (const f in fr.ex.deb) { if (fr.ex.deb[f]) debuffState[f] = JSON.parse(JSON.stringify(fr.ex.deb[f])); else delete debuffState[f]; }
   }
   if (MODE_3D && THREE_READY) redrawTex3D(); else applyOwnerColors();
   updatePlayersPanel();
@@ -4589,10 +4299,21 @@ function parseReplayText(raw) {
   let turn = 1, phase = "build", evBuf = [], pendingSummary = false; // 同回合连续概况合并成一帧
   // displayName 反查（进化名 → 原始势力 key）
   const revName = {};
+  const evNow = {}; // 当前帧各势力进化阶段（读史标签/国号显示用）
+  const _debNow = {}; // 当前帧各势力减益状态（概况状态段解析）
+  let _sawDetail = false; // 新格式概况（含发展度/建筑/状态）标记
   for (const k in C) {
     const d = C[k];
     if (d.evolved && d.evolved.name) revName[d.evolved.name] = k;
     if (d.evolved2 && d.evolved2.name) revName[d.evolved2.name] = k;
+  }
+  function branchKeyOfName(name) {
+    const k = revName[name];
+    if (!k) return null;
+    const d = C[k];
+    if (d.evolved && d.evolved.name === name) return { f: k, b: "evolved" };
+    if (d.evolved2 && d.evolved2.name === name) return { f: k, b: "evolved2" };
+    return null;
   }
   function pushFrame() {
     const stSnap = {}, plSnap = {};
@@ -4603,13 +4324,15 @@ function parseReplayText(raw) {
       stSnap[pid] = { o: s.owner || "", c: s.city || 0, d: s.dev || 0, b: s.building || "", u: u };
     }
     for (const f in _pl) plSnap[f] = { m: _pl[f].m, e: !!_pl[f].e };
-    frames.push({ turn: turn, phase: phase, t: evBuf.slice(), st: stSnap, pl: plSnap });
+    frames.push({ turn: turn, phase: phase, t: evBuf.slice(), st: stSnap, pl: plSnap, ex: { ev: Object.assign({}, evNow), cap: Object.assign({}, _replayCaps), deb: Object.assign({}, _debNow) } });
     evBuf = [];
   }
   function own(pid, f) {
     if (pid === null) return;
     const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] });
-    s.owner = revName[f] || f; // 事件行里的 辽/金/清/元/夏 还原为原始势力 key
+    const _nf = revName[f] || f;
+    if (s.owner && s.owner !== _nf && s.building === "行宫") s.building = ""; // 占领易主：行宫被毁（游戏同规则）
+    s.owner = _nf; // 事件行里的 辽/金/清/元/夏 还原为原始势力 key
   }
   function payCost(factionTxt, line) {
     // 建造/招募/发展/升级都从国库扣钱：读史左上角国库要跟着走
@@ -4662,6 +4385,11 @@ function parseReplayText(raw) {
     if (!line.trim()) continue;
     // 文件头/座位揭晓：不进入事件区（没人想看）
     if (line.indexOf("九州风云 战报") === 0 || line.indexOf("回合数：") === 0 || line.indexOf("生成时间：") === 0 || line.indexOf("---") === 0 || line.indexOf("随机揭晓") >= 0) continue;
+    // 减益状态变化行：除概况状态段外，事件也会改变（澶渊废除/冗官完成/军力突破）
+    if (line.indexOf("澶渊之盟废除") >= 0) { for (const k in _debNow) if (_debNow[k]) _debNow[k].chanyuan = false; }
+    if (line.indexOf("完成冗官改革") >= 0) { for (const k in _debNow) if (_debNow[k]) { _debNow[k].ronguan = false; _debNow[k].rgCount = 10; } }
+    const _m0 = line.match(/^(.+?) 军力突破 .*消除$/);
+    if (_m0) { const _df = revName[_m0[1]] || _m0[1]; if (_debNow[_df]) _debNow[_df].wubei = false; }
     // 是否仍处于「进攻 → 战斗行/损失行 → 占领行」序列；离开序列的行先结算兜底伤害并清理上下文
     const inBattleSeq = line.indexOf("└ 战斗：") >= 0 || line.indexOf("损失：攻方 ") >= 0 || /^(.+?) (?:顺势)?占领 /.test(line);
     if (!inBattleSeq && _atkPending) { applyFallbackDamage(); clearAttack(); }
@@ -4674,19 +4402,26 @@ function parseReplayText(raw) {
     if (m) {
       let f = m[1];
       if (revName[f]) f = revName[f];
+      const _bk0 = branchKeyOfName(m[1]); if (_bk0) evNow[_bk0.f] = _bk0.b;
       if (!_pl[f]) _pl[f] = { m: 0, e: false };
       _pl[f].m = parseFloat(m[2]) || 0;
       const list = m[5].match(/[^、]+?Lv\d+\([^)]*\)/g) || []; // 按地块项匹配（括号内兵种的"、"不切断）
+      const hasDetail = /发展\d+/.test(m[5]); // 新格式概况：地块项含「发展N」与建筑，并带状态段
+      if (hasDetail) _sawDetail = true;
       const listed = {};
       for (const item of list) {
         const pm = item.match(/^(.+?)Lv(\d+)\((.*?)\)$/);
         if (!pm) continue;
         const pid = _provId(pm[1]);
         if (pid === null) continue;
-        listed[pid] = { city: parseInt(pm[2]) || 0, units: pm[3] };
+        let unitTxt = pm[3], devTxt = null, bldTxt = "";
+        const dm = unitTxt.match(/发展(\d+)/);
+        if (dm) { devTxt = parseInt(dm[1]); unitTxt = unitTxt.replace(/，?发展\d+/, ""); }
+        const bm = unitTxt.match(/，(运河|市舶司|行宫)/);
+        if (bm) { bldTxt = bm[1]; unitTxt = unitTxt.replace(/，(运河|市舶司|行宫)/, ""); }
+        listed[pid] = { city: parseInt(pm[2]) || 0, units: unitTxt, dev: devTxt, building: bldTxt };
       }
-      // 概况是归属/城市/驻军快照：未列出的旧地块视为已易主；发展度与建筑不在概况里，保留事件行累计值，
-      // 不能清零（否则每回合概况帧所有地块的发展度/建筑都被当成变化，读史满屏金边）
+      // 概况是归属/城市/驻军快照；新格式还带发展度/建筑/状态，老格式没有则保留事件行累计值（不清零）
       for (const pid in _st) {
         if (_st[pid].owner !== f || listed[pid]) continue;
         _st[pid].owner = null; _st[pid].city = 0; _st[pid].units = [];
@@ -4696,6 +4431,18 @@ function parseReplayText(raw) {
         s.owner = f; s.city = listed[pid].city;
         s.units = [];
         if (listed[pid].units && listed[pid].units !== "无") _addUnits(pid, listed[pid].units);
+        if (hasDetail) { if (listed[pid].dev !== null) s.dev = listed[pid].dev; s.building = listed[pid].building || ""; }
+      }
+      if (hasDetail) {
+        const sm = m[4].match(/状态 ([^　]*)/);
+        const toks = sm ? sm[1].split("、").filter(Boolean) : [];
+        const dNew = { chanyuan: toks.indexOf("澶渊之盟") >= 0, rgCount: 0, ronguan: false, wubei: false };
+        for (const tk of toks) {
+          const rm = tk.match(/^(?:冗官|党争)(\d+)\/10$/);
+          if (rm) { dNew.ronguan = true; dNew.rgCount = parseInt(rm[1]) || 0; }
+          else if (tk !== "澶渊之盟") dNew.wubei = true;
+        }
+        _debNow[f] = dNew;
       }
       evBuf.push(line);
       pendingSummary = true; // 同回合后续概况继续合并
@@ -4705,6 +4452,17 @@ function parseReplayText(raw) {
     if (pendingSummary) { pushFrame(); pendingSummary = false; }
     // ---- 事件行 ----
     evBuf.push(line);
+    // 中立刷新：中立 刷新：河西 步兵×1、陇右 步兵×2（文本读史据此补中立驻军）
+    m = line.match(/^中立 刷新：(.+)$/);
+    if (m) {
+      for (const it of m[1].split("、")) {
+        const im = it.match(/^(.+?) (.+)$/);
+        if (!im) continue;
+        const pid = _provId(im[1]);
+        if (pid !== null) _addUnits(pid, im[2]);
+      }
+      pushFrame(); continue;
+    }
     // 建造城市×N / 建造城市
     m = line.match(/^(.+?) 在 (.+?) 建造城市(?:×(\d+))?（-/);
     if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = Math.max(s.city || 0, 1); } payCost(m[1], line); pushFrame(); continue; }
@@ -4821,13 +4579,27 @@ function parseReplayText(raw) {
     }
     // 王朝建立（女真→金 等进化：仅记录事件帧，归属名以概况为准）
     m = line.match(/^(.+?) 成立王朝$/);
-    if (m) { pushFrame(); continue; }
+    if (m) {
+      const _bk = branchKeyOfName(m[1]);
+      if (_bk) evNow[_bk.f] = _bk.b;
+      pushFrame(); continue;
+    }
     // 外交支援：宋 支援 汉 5 钱（更新国库）
     m = line.match(/^.*?([\u4e00-\u9fa5]{1,4}) 支援 ([\u4e00-\u9fa5]{1,4}) ([\d.]+) 钱$/);
     if (m) { var _fa = revName[m[1]] || m[1], _fb = revName[m[2]] || m[2], _amt = parseFloat(m[3]) || 0; if (_pl[_fa]) _pl[_fa].m -= _amt; if (_pl[_fb]) _pl[_fb].m += _amt; pushFrame(); continue; }
+    // 迁都至行宫旧址：摧毁行宫并补偿 20 钱（游戏内实际入账）
+    m = line.match(/^(.+?) 迁都至行宫旧址，行宫被摧毁（\+([\d.]+) 钱补偿）$/);
+    if (m) { const _ff = revName[m[1]] || m[1]; const _fp = _pl[_ff]; if (_fp) _fp.m = Math.round((_fp.m + (parseFloat(m[2]) || 0)) * 100) / 100; pushFrame(); continue; }
+    // 城市降级（游牧迁都：旧首都 -1 级）
+    m = line.match(/^(.+?) 在 (.+?) 城市降低至 Lv(\d+)/);
+    if (m) { const pid = _provId(m[2]); if (pid !== null) { const s = _st[pid] || (_st[pid] = { owner: null, city: 0, dev: 0, building: "", units: [] }); s.city = parseInt(m[3]); } pushFrame(); continue; }
     // 迁都：维护首都记录（首都加粗用）
-    m = line.match(/^(.+?) 迁都至 ([^，]+)$/);
-    if (m) { var _fc = revName[m[1]] || m[1]; _replayCaps[_fc] = m[2]; pushFrame(); continue; }
+    m = line.match(/^(.+?) 迁都至 ([^，]+?)(?:（-([\d.]+) 钱）)?$/);
+    if (m) {
+      var _fc = revName[m[1]] || m[1]; _replayCaps[_fc] = m[2];
+      if (m[3]) { const _cp = _pl[_fc]; if (_cp) _cp.m = Math.round((_cp.m - (parseFloat(m[3]) || 0)) * 100) / 100; }
+      pushFrame(); continue;
+    }
     // 灭亡（支持进化名反查）
     m = line.match(/^(.+?) 灭亡了！$/);
     if (m) {
@@ -4835,6 +4607,7 @@ function parseReplayText(raw) {
       if (_pl[_fn]) _pl[_fn].e = true;
       for (var _dp2 in _st) {
         if (_st[_dp2] && _st[_dp2].owner === _fn) {
+          if (_st[_dp2].building === "行宫") _st[_dp2].building = ""; // 灭亡：行宫随地块销毁
           _st[_dp2].owner = null;
           _st[_dp2].units = [];
         }
@@ -4848,7 +4621,7 @@ function parseReplayText(raw) {
   if (evBuf.length) pushFrame(); // 收尾：不再有后续事件承接的最后若干行也成帧，避免详情丢失
   const seats = [];
   for (const f in _pl) seats.push({ name: "", type: "ai", f: f });
-  return { type: "九州风云读史", version: 2, title: "九州风云 战报", seats: seats, frames: frames };
+  return { type: "九州风云读史", version: 2, fullState: true, fullState: _sawDetail, title: "九州风云 战报", seats: seats, frames: frames };
 }
 
 function renderReplayLabels() {
@@ -4859,13 +4632,13 @@ function renderReplayLabels() {
     const lv = l.querySelector(".plv");
     if (lv) {
       const devTier = (s && s.dev) ? Math.floor(s.dev / 20) : 0;
-      const tierTxt = (!replayMode && s && s.owner) ? ROMAN_TIER[Math.min(10, devTier)] : ""; // 读史：无发展度数据，不显示罗马数字
+      const tierTxt = ((replayFullState || !replayMode) && s && s.owner) ? ROMAN_TIER[Math.min(10, devTier)] : ""; // 新格式读史带发展度：显示罗马数字
       const cityTxt = (s && s.owner && s.city > 0) ? "Lv" + s.city : "";
       lv.innerHTML = (tierTxt ? '<span class="plv-tier">' + tierTxt + '</span>' : '') + (tierTxt && cityTxt ? '·' : '') + (cityTxt ? '<span class="plv-city">' + cityTxt + '</span>' : '');
     }
     const pn = l.querySelector(".pname");
     if (pn) {
-      const capName = s && s.owner ? (_replayCaps[s.owner] || mutableCapital[s.owner] || CAPITAL_MAP[s.owner]) : null;
+      const capName = s && s.owner ? (mutableCapital[s.owner] || _replayCaps[s.owner] || CAPITAL_MAP[s.owner]) : null;
       const provName = pn.textContent;
       pn.classList.toggle("cap", !!capName && capName === provName);
     }
@@ -4901,8 +4674,8 @@ function renderReplayUnits() {
   for (const p of DATA) {
     const s = provState[p.id];
     if (!s || !s.units) continue;
-    if (!s.owner) continue; // 读史：中立地块统一不显示兵力
     if (compactUnits) {
+      const bldgEmoji = (s.building && BUILDING_EMOJI[s.building]) ? BUILDING_EMOJI[s.building] : "";
       let inf = 0, cav = 0, rng = 0, spec = 0;
       for (const u of s.units) {
         if (u.kind === "spec") spec++;
@@ -4910,12 +4683,12 @@ function renderReplayUnits() {
         else if (u.kind === "cav") cav++;
         else rng++;
       }
-      if (inf + cav + rng + spec > 0) {
+      if (inf + cav + rng + spec > 0 || bldgEmoji) {
         const el = document.createElement("div");
         el.className = "unit-sum";
         el.dataset.x = p.center[0];
         el.dataset.y = p.center[1] + 24;
-        el.textContent = (inf ? "⚔️" + inf : "") + (cav ? " 🐴" + cav : "") + (rng ? " 🏹" + rng : "") + (spec ? " ⭐" + spec : "");
+        el.textContent = (inf ? "⚔️" + inf : "") + (cav ? " 🐴" + cav : "") + (rng ? " 🏹" + rng : "") + (spec ? " ⭐" + spec : "") + (bldgEmoji ? " " + bldgEmoji : "");
         container.appendChild(el);
       }
     } else {
@@ -4979,6 +4752,7 @@ function exitReplay() {
   for (const k in playerState) delete playerState[k];
   for (const k in eliminated) delete eliminated[k];
   replayFrames = []; replayData = null; _replayCaps = {};
+  if (_preReplayMeta) { evolved = _preReplayMeta.ev; mutableCapital = _preReplayMeta.cap; debuffState = _preReplayMeta.deb; _preReplayMeta = null; } // 退出读史：恢复赛前全局状态
   document.getElementById("setup").classList.remove("hidden");
   document.getElementById("map-page").classList.add("hidden");
 }
@@ -5306,6 +5080,12 @@ function isEnclave(provId, faction) {
   return true;
 }
 
+// provState 条目本身不带 id，只有 units/city/building/owner/dev，需要按引用反查所属地块
+function provOfState(s) {
+  if (!s) return null;
+  for (const p of DATA) { if (provState[p.id] === s) return p; }
+  return null;
+}
 // 招募价格（含势力折扣：唐 骑兵-3 / 辽北面官首都行宫骑兵-3）
 function unitCostWithDiscount(faction, def, s) {
   let c = def.cost;
@@ -5314,7 +5094,8 @@ function unitCostWithDiscount(faction, def, s) {
   if (faction === "唐" && isCavKind) c -= 3;
   if (isLiao(faction) && liaoNorth === true && def.name === "骑兵" && s) {
     const cap = mutableCapital[faction] || CAPITAL_MAP[faction];
-    if (provinceById[s.id] && (provinceById[s.id].name === cap || s.building === "行宫")) c -= 3;
+    const prov = provOfState(s); // 原写法 provinceById[s.id]：s.id 恒为 undefined，北面官折扣一直没生效
+    if (prov && (prov.name === cap || s.building === "行宫")) c -= 3;
   }
   return Math.max(0, c); // 价格不为负
 }
@@ -6813,7 +6594,7 @@ function applyCapitals(){
 }
 
 // ===== 拖拽 + 战斗系统 =====
-const NEIGHBORS = {"荒漠": ["七河", "中圻", "云南", "北圻", "南圻", "卫藏", "塔里木", "康巴", "海兰泡", "海洋", "漠北", "漠西", "阿里"], "海洋": ["七河", "两淮", "中圻", "京畿", "准噶尔", "北圻", "南圻", "卫藏", "塔里木", "山东", "平安", "广东", "庆尚", "库页", "江南", "江西", "河北", "浙江", "海兰泡", "海参崴", "湖南", "漠北", "漠西", "燕云", "琉球", "福建", "荒漠", "辽宁", "鄂伦春", "阿里", "雷琼", "青海", "黑龙江"], "海兰泡": ["库页", "海洋", "漠北", "荒漠", "鄂伦春", "黑龙江"], "漠北": ["戈壁", "松漠", "海兰泡", "海洋", "漠南", "漠西", "荒漠", "鄂伦春"], "库页": ["海兰泡", "海参崴", "海洋", "黑龙江"], "漠西": ["七河", "准噶尔", "吐鲁番", "宁夏", "戈壁", "海洋", "漠北", "荒漠"], "黑龙江": ["吉林", "库页", "松江", "松漠", "海兰泡", "海参崴", "海洋", "鄂伦春"], "鄂伦春": ["松漠", "海兰泡", "海洋", "漠北", "黑龙江"], "七河": ["准噶尔", "塔里木", "海洋", "漠西", "荒漠"], "准噶尔": ["七河", "吐鲁番", "塔里木", "海洋", "漠西"], "海参崴": ["平安", "库页", "松江", "海洋", "黑龙江"], "松漠": ["吉林", "漠北", "漠南", "燕云", "辽宁", "鄂伦春", "黑龙江"], "戈壁": ["宁夏", "漠北", "漠南", "漠西"], "漠南": ["宁夏", "山西", "戈壁", "松漠", "漠北", "燕云", "陕西"], "吉林": ["平安", "松江", "松漠", "辽宁", "黑龙江"], "松江": ["吉林", "平安", "海参崴", "黑龙江"], "吐鲁番": ["准噶尔", "塔里木", "宁夏", "河西", "漠西"], "塔里木": ["七河", "准噶尔", "吐鲁番", "河西", "海洋", "荒漠", "阿里", "青海"], "平安": ["京畿", "吉林", "松江", "海参崴", "海洋", "辽宁"], "辽宁": ["吉林", "平安", "松漠", "海洋", "燕云", "山东"], "宁夏": ["吐鲁番", "戈壁", "河西", "漠南", "漠西", "陇右", "陕西"], "河西": ["吐鲁番", "塔里木", "宁夏", "陇右", "青海"], "燕云": ["山西", "松漠", "河北", "海洋", "漠南", "辽宁"], "河北": ["山东", "山西", "河南", "海洋", "燕云"], "山西": ["河北", "河南", "漠南", "燕云", "陕西"], "陕西": ["宁夏", "山西", "川东", "河南", "湖北", "漠南", "陇右"], "青海": ["卫藏", "塔里木", "康巴", "河西", "海洋", "西川", "阿里", "陇右"], "京畿": ["平安", "庆尚", "海洋"], "山东": ["两淮", "河北", "河南", "海洋", "辽宁"], "陇右": ["宁夏", "川东", "河西", "西川", "陕西", "青海"], "庆尚": ["京畿", "海洋"], "河南": ["两淮", "山东", "山西", "河北", "湖北", "陕西"], "阿里": ["卫藏", "塔里木", "海洋", "荒漠", "青海"], "两淮": ["山东", "江南", "河南", "海洋", "湖北"], "康巴": ["云南", "卫藏", "荒漠", "西川", "青海"], "西川": ["云南", "川东", "康巴", "贵州", "陇右", "青海"], "湖北": ["两淮", "川东", "江南", "江西", "河南", "湖南", "陕西"], "卫藏": ["康巴", "海洋", "荒漠", "阿里", "青海"], "川东": ["湖北", "湖南", "西川", "贵州", "陇右", "陕西"], "江南": ["两淮", "江西", "浙江", "海洋", "湖北"], "浙江": ["江南", "江西", "海洋", "福建"], "湖南": ["川东", "广东", "广西", "江西", "海洋", "湖北", "贵州"], "江西": ["广东", "江南", "浙江", "海洋", "湖北", "湖南", "福建"], "云南": ["北圻", "广西", "康巴", "荒漠", "西川", "贵州"], "贵州": ["云南", "川东", "广西", "湖南", "西川"], "福建": ["广东", "江西", "浙江", "海洋", "琉球"], "广西": ["云南", "北圻", "广东", "湖南", "贵州", "雷琼"], "广东": ["广西", "江西", "海洋", "湖南", "福建", "雷琼"], "琉球": ["海洋", "福建"], "雷琼": ["北圻", "广东", "广西", "海洋"], "北圻": ["中圻", "云南", "广西", "海洋", "荒漠", "雷琼"], "中圻": ["北圻", "南圻", "海洋", "荒漠"], "南圻": ["中圻", "海洋", "荒漠"]};
+const NEIGHBORS = {"荒漠": ["七河", "中圻", "云南", "北圻", "南圻", "卫藏", "塔里木", "康巴", "海兰泡", "海洋", "漠北", "漠西", "阿里"], "海洋": ["七河", "两淮", "中圻", "京畿", "北圻", "南圻", "卫藏", "塔里木", "山东", "平安", "广东", "庆尚", "库页", "江南", "江西", "河北", "浙江", "海兰泡", "海参崴", "湖南", "漠北", "漠西", "燕云", "琉球", "福建", "荒漠", "辽宁", "鄂伦春", "阿里", "雷琼", "青海", "黑龙江"], "海兰泡": ["库页", "海洋", "漠北", "荒漠", "鄂伦春", "黑龙江"], "漠北": ["戈壁", "松漠", "海兰泡", "海洋", "漠南", "漠西", "荒漠", "鄂伦春"], "库页": ["海兰泡", "海参崴", "海洋", "黑龙江"], "漠西": ["七河", "准噶尔", "吐鲁番", "戈壁", "海洋", "漠北", "荒漠"], "黑龙江": ["吉林", "库页", "松江", "松漠", "海兰泡", "海参崴", "海洋", "鄂伦春"], "鄂伦春": ["松漠", "海兰泡", "海洋", "漠北", "黑龙江"], "七河": ["准噶尔", "塔里木", "海洋", "漠西", "荒漠"], "准噶尔": ["七河", "吐鲁番", "塔里木", "漠西"], "海参崴": ["平安", "库页", "松江", "海洋", "黑龙江"], "松漠": ["吉林", "漠北", "漠南", "燕云", "辽宁", "鄂伦春", "黑龙江"], "戈壁": ["宁夏", "漠北", "漠南", "漠西", "吐鲁番"], "漠南": ["宁夏", "山西", "戈壁", "松漠", "漠北", "燕云", "陕西"], "吉林": ["平安", "松江", "松漠", "辽宁", "黑龙江"], "松江": ["吉林", "平安", "海参崴", "黑龙江"], "吐鲁番": ["准噶尔", "塔里木", "宁夏", "河西", "漠西", "戈壁"], "塔里木": ["七河", "准噶尔", "吐鲁番", "河西", "海洋", "荒漠", "阿里", "青海"], "平安": ["京畿", "吉林", "松江", "海参崴", "海洋", "辽宁"], "辽宁": ["吉林", "平安", "松漠", "海洋", "燕云", "山东"], "宁夏": ["吐鲁番", "戈壁", "河西", "漠南", "陇右", "陕西"], "河西": ["吐鲁番", "塔里木", "宁夏", "陇右", "青海"], "燕云": ["山西", "松漠", "河北", "海洋", "漠南", "辽宁"], "河北": ["山东", "山西", "河南", "海洋", "燕云"], "山西": ["河北", "河南", "漠南", "燕云", "陕西"], "陕西": ["宁夏", "山西", "川东", "河南", "湖北", "漠南", "陇右"], "青海": ["卫藏", "塔里木", "康巴", "河西", "海洋", "西川", "阿里", "陇右"], "京畿": ["平安", "庆尚", "海洋"], "山东": ["两淮", "河北", "河南", "海洋", "辽宁"], "陇右": ["宁夏", "川东", "河西", "西川", "陕西", "青海"], "庆尚": ["京畿", "海洋"], "河南": ["两淮", "山东", "山西", "河北", "湖北", "陕西"], "阿里": ["卫藏", "塔里木", "海洋", "荒漠", "青海"], "两淮": ["山东", "江南", "河南", "海洋", "湖北"], "康巴": ["云南", "卫藏", "荒漠", "西川", "青海"], "西川": ["云南", "川东", "康巴", "贵州", "陇右", "青海"], "湖北": ["两淮", "川东", "江南", "江西", "河南", "湖南", "陕西"], "卫藏": ["康巴", "海洋", "荒漠", "阿里", "青海"], "川东": ["湖北", "湖南", "西川", "贵州", "陇右", "陕西"], "江南": ["两淮", "江西", "浙江", "海洋", "湖北"], "浙江": ["江南", "江西", "海洋", "福建"], "湖南": ["川东", "广东", "广西", "江西", "海洋", "湖北", "贵州"], "江西": ["广东", "江南", "浙江", "海洋", "湖北", "湖南", "福建"], "云南": ["北圻", "广西", "康巴", "荒漠", "西川", "贵州"], "贵州": ["云南", "川东", "广西", "湖南", "西川"], "福建": ["广东", "江西", "浙江", "海洋", "琉球"], "广西": ["云南", "北圻", "广东", "湖南", "贵州", "雷琼"], "广东": ["广西", "江西", "海洋", "湖南", "福建", "雷琼"], "琉球": ["海洋", "福建"], "雷琼": ["北圻", "广东", "广西", "海洋"], "北圻": ["中圻", "云南", "广西", "海洋", "荒漠", "雷琼"], "中圻": ["北圻", "南圻", "海洋", "荒漠"], "南圻": ["中圻", "海洋", "荒漠"]};
 // 兵种战力（通用兵种 / 特殊兵种）
 const UNIT_POWER = {inf:0, cav:1, rng:1};
 const SPEC_POWER = {"秦弩手":1,"羽林军":1,"北府军":0,"楼船":1,"玄甲军":1,"步人甲":0,"神机营":1,"农民军":-1,"铁浮屠":1,"八旗军":1,"回回炮":1,"步跋子":0,"铁鹞子":1};
@@ -6974,6 +6755,7 @@ function checkEliminations() {
   if (elimChecking) return;
   elimChecking = true;
   let alive = 0, winner = null;
+  let _elimChanged = false; // 读史：本次检查是否发生灭亡/强制迁都，发生则补一帧
   for (let i=0;i<pickOrder.length;i++) {
     const f = picks[i];
     if (!f || eliminated[f]) continue;
@@ -6988,6 +6770,7 @@ function checkEliminations() {
     // 占领全部地块模式：失去所有地块即灭亡；其他模式：失去所有城市即灭亡
     if ((winCond === "land" ? owned === 0 : cities === 0)) {
       eliminated[f] = true;
+      _elimChanged = true;
       // 辽（契丹）灭亡：澶渊之盟随之废除
       if (f === dealTarget() && debuffState["宋"] && debuffState["宋"].chanyuan) {
         debuffState["宋"].chanyuan = false;
@@ -7037,6 +6820,7 @@ function checkEliminations() {
           }
           if (bestCap) {
             mutableCapital[f] = bestCap;
+            _elimChanged = true;
             // AI 迁都到行宫旧址：补偿行宫造价（20 钱）+ 行宫摧毁（静默生效）
             const bcs = provState[provByName(bestCap).id];
             if (bcs && bcs.building === "行宫") {
@@ -7051,6 +6835,7 @@ function checkEliminations() {
       }
     }
   }
+  if (_elimChanged) recordReplayFrame(); // 读史：灭亡/强制迁都后补一帧，保证 JSON 读史不漏状态
   if (winCond === "history" && scenarioGoals()) {
     checkGoals(); // 遵循历史：以达成历史目标判定胜负
   } else {
@@ -7062,7 +6847,7 @@ function checkEliminations() {
     }
     // 按设置的胜利条件判定
     if (!gameOverShown) {
-      if (winCond === "land") {
+  if (winCond === "land") {
       // 占领全部地块模式：灭亡制（玩家失去所有地块即灭亡），由存活判定（alive===1）决出胜者
     } else {
       // 占领全部城市
@@ -7344,6 +7129,7 @@ document.addEventListener("pointerup", function(e) {
       updatePlayersPanel(); // 单兵调动/占领后左上角实时刷新
       applyOwnerColors();
       checkEliminations(); // 单兵调动占领（含城市地块）后做灭亡检查（与联合调动一致）
+      recordReplayFrame(); // 读史：单兵调动/占领后记录状态帧（含灭亡清理后的归属/驻军）
       if (dst.owner !== oldOwner) {
         playCaptureAnim(tgt); // 内部已锁缩放
       }
@@ -9402,6 +9188,7 @@ function confirm(){
   }
   if(currentPick>=pickOrder.length-1){
     chronicle = []; incomeHistory = {}; powerHistory = {};
+    replayFrames = []; chronicleMark = 0; // 新局：读史帧从头记录（防上一局帧/游标残留）
     resolveRandomPicks();
     showMap()
   }else{currentPick++;updatePickUI();showPick()}
