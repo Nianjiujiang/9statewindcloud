@@ -708,10 +708,6 @@ const ADV_MODE = (typeof window !== "undefined" && window.__ADV_MODE__) || "C-po
 // 军队维护费（测试用）：off | price5（兵种基础价/5） | flat2（每兵 2 钱）
 const UPKEEP_MODE = (typeof window !== "undefined" && window.__UPKEEP_MODE__) || "price5";
 
-// 招募上限（测试用）：off | A（城市等级×2，无城 1） | B（城市等级+1）
-const RECRUIT_CAP = (typeof window !== "undefined" && window.__RECRUIT_CAP__) || "off";
-// 中立守军参与兵力优势判定（中立只算本地块）
-const NEUTRAL_ADV = (typeof window !== "undefined" && window.__NEUTRAL_ADV__) === true;
 
 // 渲染层总开关：写渲染相关函数时统一在开头 `if (HZ_HEADLESS) return;`
 function renderOn() { return !HZ_HEADLESS; }
@@ -1150,7 +1146,7 @@ function calcTransfers() {
         if (np && provState[np.id] && provState[np.id].owner === jin) { adj = true; break; }
       }
       if (!adj) continue;
-      neut += (p.dev || 0) * 1 * (2 * s.city + 1) * (boardMode ? 1 : incomeMult); // 中立地块收入也乘倍率（与 calcIncomeRaw 一致）
+      neut += (p.dev || 0) * 1 * (s.city + 1) * (boardMode ? 1 : incomeMult); // 中立地块收入也乘倍率（与 calcIncomeRaw 一致）
     }
     tr[jin].in += Math.round(neut * 0.2 * 100) / 100; // 金朝贡：相邻和平中立地块 20%
   }
@@ -1205,7 +1201,7 @@ function calcIncomeRaw(f) {
   for (const p of DATA) {
     const s = provState[p.id];
     if (!s || s.owner !== f) continue;
-    let pi = (s.dev || p.dev || 0) * 1 * (2 * s.city + 1); // 新版：1 点发展度 = 1 钱 × 城市系数
+    let pi = (s.dev || p.dev || 0) * 1 * (s.city + 1); // 新版：1 点发展度 = 1 钱 ×（城市等级 + 1）
     if (isQin && s.units.length > 0) pi += 2;
     if (s.building === "运河") pi += 3 + (s.city || 0); // 运河收入随城市等级：3+城市等级（3~7），回本更快
     inc += pi;
@@ -1547,7 +1543,7 @@ function buildEconCandidates(f, ps, own, opts) {
             if (!allShi2) continue;
             const N = 4 - (st.city || 0);
             const savedMoney = N * 10;
-            const incGain = ((st.dev || p.dev || 0) * 2 + (st.building === "运河" ? 1 : 0)) * N * incomeScale();
+            const incGain = ((st.dev || p.dev || 0) * N + (st.building === "运河" ? 1 : 0)) * incomeScale();
             roi = bdef.cost / (incGain + savedMoney / 10);
           }
           eco.push({ t: "bld", roi: roi, cost: bdef.cost, pid: p.id });
@@ -1561,7 +1557,7 @@ function buildEconCandidates(f, ps, own, opts) {
       if (st.city >= 1 && st.city < 4) {
         let cost = 20 - (st.building === "市舶司" ? 10 : 0);
         if (isLiao(f) && liaoNorth === false) cost -= 5;
-        let roi = (st.dev || 0) > 0 ? cost / (((st.dev || 0) * 2 + (st.building === "运河" ? 1 : 0)) * incomeScale()) * 0.6 : 999;
+        let roi = (st.dev || 0) > 0 ? cost / (((st.dev || 0) + (st.building === "运河" ? 1 : 0)) * incomeScale()) * 0.6 : 999;
         if (capProv && p.id === capProv.id && aiThreat(p.id, f) > 0) roi = roi * 0.5;
         eco.push({ t: "city", roi: roi, cost: cost, pid: p.id });
       }
@@ -1573,7 +1569,7 @@ function buildEconCandidates(f, ps, own, opts) {
       let cost = 20 + (isNomadFaction(f) && f !== "党项" ? 5 : 0) - (st.building === "市舶司" ? 10 : 0);
       if (f === "明" && isMingBuffCap() && provinceById[p.id].name === (mutableCapital["明"] || CAPITAL_MAP["明"])) cost -= 5;
       if (st.building === "行宫") cost -= 20;
-      const roiCity = (st.dev || 0) > 0 ? 20 / ((st.dev || 0) * 2 * incomeScale()) * 0.5 : 999;
+      const roiCity = (st.dev || 0) > 0 ? 20 / ((st.dev || 0) * incomeScale()) * 0.5 : 999;
       eco.push({ t: "city", roi: roiCity, cost: cost, pid: p.id });
     }
   }
@@ -1584,12 +1580,12 @@ function buildEconCandidates(f, ps, own, opts) {
       if (opts.devBatch5) {
         const r5 = devCostTotal5(p, st, f);
         if (r5.times > 0) {
-          const gain = (2 * st.city + 1) * r5.times * incomeScale();
+          const gain = (st.city + 1) * r5.times * incomeScale();
           eco.push({ t: "dev", roi: gain > 0 ? r5.cost / gain : 999, cost: r5.cost, pid: p.id, times: r5.times });
         }
       } else {
         const cost = devCost(p, st, f);
-        const gain = (2 * st.city + 1) * incomeScale();
+        const gain = (st.city + 1) * incomeScale();
         eco.push({ t: "dev", roi: gain > 0 ? cost / gain : 999, cost: cost, pid: p.id });
       }
     }
@@ -1605,6 +1601,89 @@ function aiCanAct(u) {
 }
 function aiCanMove(u) { return u.moves >= moveCost(u) && !u.guard; } // 调动条件（守卫兵不动）
 function aiCanFight(u) { return u.moves > 0 && u.atk > 0 && !u.guard; } // 攻击条件（消耗 1 调动 + 1 攻击点；守卫兵不动）
+// 后方闲置兵向最近前线推进一步（每回合只做一次）：腹地不许堆兵看戏
+// 目标是否处于兵力优势（任一相邻己方地块出发可吃双骰）
+function aiAdvTarget(f, tgtId) {
+  const tgt = provinceById[tgtId];
+  if (!tgt) return false;
+  for (const nm of (NEIGHBORS[tgt.name] || [])) {
+    const np = provByName(nm);
+    if (!np) continue;
+    const ns = provState[np.id];
+    if (!ns || ns.owner !== f) continue;
+    if (!ns.units.some(function(u) { return aiCanFight(u); })) continue;
+    try { if (_advCompute(f, np.id, tgtId)) return true; } catch (e) {}
+  }
+  return false;
+}
+// 纯腹地：所有陆地邻居都归自己（没有敌人、没有中立）→ 不需要留兵
+function aiIsInterior(p, f) {
+  for (const nm of (NEIGHBORS[p.name] || [])) {
+    const np = provByName(nm);
+    if (!np || !np.is_land) continue;
+    const ns = provState[np.id];
+    if (!ns || ns.owner !== f) return false;
+  }
+  return true;
+}
+let aiRearPulledTurn = -1;
+function aiPullRearToFront(f) {
+  if (aiRearPulledTurn === currentTurn) return;
+  aiRearPulledTurn = currentTurn;
+  const own = aiOwnedProvinces(f);
+  if (!own.length) return;
+  const dist = {}, q = [];
+  for (const p of own) {
+    const nb = NEIGHBORS[p.name] || [];
+    let front = false;
+    for (const nm of nb) {
+      const np = provByName(nm);
+      if (!np || !np.is_land) continue;
+      const ns = provState[np.id];
+      if (!ns || ns.owner !== f) { front = true; break; }
+    }
+    if (front) { dist[p.id] = 0; q.push(p.id); }
+  }
+  for (let i = 0; i < q.length; i++) {
+    const id = q[i], p = provinceById[id];
+    for (const nm of (NEIGHBORS[p.name] || [])) {
+      const np = provByName(nm);
+      if (!np || dist[np.id] !== undefined) continue;
+      const ns = provState[np.id];
+      if (!ns || ns.owner !== f) continue;
+      dist[np.id] = dist[id] + 1;
+      q.push(np.id);
+    }
+  }
+  for (const p of own) {
+    const d = dist[p.id];
+    if (d === undefined || d === 0) continue;
+    const st = provState[p.id];
+    if (!st || aiThreat(p.id, f) > 0) continue;
+    const keepHome = aiIsInterior(p, f) ? 0 : 1;
+    if (armyCount(st) <= keepHome) continue;
+    let best = null, bd = 1e9;
+    for (const nm of (NEIGHBORS[p.name] || [])) {
+      const np = provByName(nm);
+      if (!np) continue;
+      const ns = provState[np.id];
+      if (!ns || ns.owner !== f) continue;
+      const nd = dist[np.id];
+      if (nd === undefined || nd >= d) continue;
+      if (nd < bd) { bd = nd; best = np; }
+    }
+    if (!best) continue;
+    const saved = [];
+    let keep = keepHome;
+    for (const u of st.units) {
+      if (aiCanMove(u)) {
+        if (keep > 0) { saved.push({ u: u, m: u.moves }); u.moves = 0; keep--; }
+      }
+    }
+    try { executeJointMove(p.id, best.id); } catch (e) {}
+    for (const it of saved) it.u.moves = it.m;
+  }
+}
 function aiActionNormal() {
   if (gamePhase !== "action") { aiAdvance(); return; }
   const f = picks[currentPlayerIdx];
@@ -1714,7 +1793,7 @@ for (const p of DATA) {
   }
   if (hasPlayerVacant) break;
 }
-if (hasHateTarget || hasPlayerVacant || frontGap < 6 || hasWeakTarget || hasNeutralTarget || calcPower(f2) >= 300) { // 仇恨目标（关系≤14）优先打，无视守备压制
+if (hasHateTarget || hasPlayerVacant || frontGap < 8 || hasWeakTarget || hasNeutralTarget || calcPower(f2) >= 150) { // 进攻权重：守备缺口容忍到 8、弱军力也敢动手 // 仇恨目标（关系≤14）优先打，无视守备压制
     // 1. 中立集中进攻：集中兵力致胜——锁定单一最优中立目标（守军少 + 扩张倾向），相邻省轮流打，拿下再换
     if (!aiNeutralFocus || !provState[aiNeutralFocus] || provState[aiNeutralFocus].owner || armyCount(provState[aiNeutralFocus]) === 0) {
       // 重新选最优中立目标（相邻有可出兵省）
@@ -1874,10 +1953,12 @@ if (aiNeutralFocus) {
       const ra = getRel(f2, provState[a.id].owner), rb = getRel(f2, provState[b.id].owner);
       const ca = Math.round(provIncome(a, provState[a.id]) * 2), cb = Math.round(provIncome(b, provState[b.id]) * 2); // 经济权重：地块收入×2（富地优先打，削经济）
       // 空地权重：占空地走调动（executeJointMove）不算进攻，目标池里容易排最后被饿死 → 白占地皮纯收益，显式加权优先
+      const advA = aiAdvTarget(f2, a.id) ? 70 : 0;
+      const advB = aiAdvTarget(f2, b.id) ? 70 : 0;
       const va = armyCount(provState[a.id]) === 0 ? 45 : 0;
       const vb = armyCount(provState[b.id]) === 0 ? 45 : 0;
-      const sa = wa * 8 + pa * 1.2 + (100 - ra) + ca + va - aiExpansionBias(f2, a); // 包围省数×8 + 包围兵力×1.2 + 关系 + 经济 + 空地加成 + 偏好（兵越多越优先打）
-      const sb = wb * 8 + pb * 1.2 + (100 - rb) + cb + vb - aiExpansionBias(f2, b);
+      const sa = wa * 8 + pa * 1.2 + (100 - ra) + ca + va + advA - aiExpansionBias(f2, a); // 包围省数×8 + 包围兵力×1.2 + 关系 + 经济 + 空地 + 优势骰加成
+      const sb = wb * 8 + pb * 1.2 + (100 - rb) + cb + vb + advB - aiExpansionBias(f2, b);
       return sb - sa;
     });
     let attacked = false;
@@ -1900,7 +1981,7 @@ if (aiNeutralFocus) {
           if (canMoveN >= 1 && (!thN || canMoveN >= 2)) { srcList.push({ id: np.id, canFight: canMoveN }); totalUsable += canMoveN - (thN ? 1 : 0); }
         } else if (canFightN > 1) { srcList.push({ id: np.id, canFight: canFightN }); totalUsable += canFightN - 1; } // 每省留 1 守家
       }
-      const needUsable = defCntT === 0 ? 1 : Math.max(1, Math.round(defCntT * (calcPower(f2) >= 150 || getRel(f2, provState[tgt.id].owner) <= 14 ? 0.3 : 0.45)));
+      const needUsable = aiAdvTarget(f2, tgt.id) ? 1 : (defCntT === 0 ? 1 : Math.max(1, Math.round(defCntT * (calcPower(f2) >= 150 || getRel(f2, provState[tgt.id].owner) <= 14 ? 0.3 : 0.45))));
       if (totalUsable < needUsable) continue; // 多省总兵力门槛（空地只需 1 兵；降低，进攻欲望大增）
       // 轮流出兵：优先多兵省（每省留 1 守家），每省每目标本回合一次（防死磕）
       srcList.sort(function(a, b) { return b.canFight - a.canFight; });
@@ -2138,6 +2219,7 @@ function aiBuildTurn() {
   // 女真进化交给下面「6. 进化」统一处理：会按战况在金/清之间选分支，
   // 而且必须在 let steps 之后执行——原先写在这里会在 15ms 后命中 steps 的 TDZ，整局锁死。
   let steps = 0;
+  try { aiPullRearToFront(f); } catch (e) {}
   let aiBuildRetry = false; // 国库兜底：结束时钱没花完（≥20）再跑一轮建造（只一次）
   let spentEcon = 0, spentMil = 0; // 双预算记账
   // 固定预算（回合开始时定死一次，避免每步按当前国库重算导致漂移）
@@ -2203,7 +2285,7 @@ function aiBuildTurn() {
           const pm = provByName(nm); if (!pm) continue;
           const sm = provState[pm.id];
           if (!sm || sm.owner !== "明") continue;
-          const val = (sm.dev || 0) * (2 * sm.city + 1);
+          const val = (sm.dev || 0) * (sm.city + 1);
           if (val > bestValM) { bestValM = val; bestM = pm; }
         }
         if (bestM && bestM.name !== curM) { mingMoveCapital(bestM.id); return setTimeout(aiBuildStep, 15); }
@@ -2227,7 +2309,7 @@ function aiBuildTurn() {
     for (const p of own) {
       const st = provState[p.id];
       const threat = aiThreat(p.id, f2);
-      const want = threat > 0 ? Math.max(1, Math.round(threat * 0.4)) : 1;
+      const want = threat > 0 ? Math.max(1, Math.round(threat * 0.4)) : (aiIsInterior(p, f2) ? 0 : 1);
       if (!powerCap && armyCount(st) < want && ps2.treasury >= 5 && canRecruit(st, UNIT_DEFS["步兵"])) {
         const tb = ps2.treasury;
         recruitUnit(p.id, "步兵");
@@ -2366,7 +2448,6 @@ function startPhase(p, silent) {
   battleLossMerge = null; // 跨回合打断战斗损失合并
   lastAtkKey = null; lastAtkLine = -1; atkMergeUnits = null; atkDefTxt = ""; // 跨回合打断进攻行合并（骑兵二动等）
   if (p === "build") {
-    if (typeof recruitTurnCount === "object") recruitTurnCount = {};
     if (typeof histSuppress !== "undefined") histSuppress = true; // 先只写文字，finally 由「回合结算」统一提交差量
     // 回合开始：列出各国收入/军力/占领地块（每国一行）
     for (let i = 0; i < pickOrder.length; i++) {
@@ -2751,14 +2832,14 @@ function canEvolve(f) {
   const req = C[f].evolveReq;
   if (!req) return false;
   const areas = parseEvolveReq(f);
-  let owned = 0, cities = 0;
+  let owned = 0, cityLevels = 0;
   for (const p of DATA) {
     const s = provState[p.id];
     if (!s || s.owner !== f) continue;
     if (areas.indexOf(p.name) >= 0) owned++;
-    if (s.city >= 1) cities++; // 城市数量计数（规则书：至少三座城市）
+    cityLevels += (s.city || 0); // 城市等级总和（规则表述仍是「三座城市」）
   }
-  return owned >= 2 && cities >= 3;
+  return owned >= 2 && cityLevels >= 3;
 }
 // 明朝特性「天子守国门」：可主动迁都至四地（全局一次）
 // 明 buff 生效条件：首都为江南/燕云/广东（两淮默认首都不享受；被动迁都到别处也失效）
@@ -5315,7 +5396,6 @@ function getRecruitable(faction) {
   return list;
 }
 // 招募：扣国库 + 新兵出现在地块内
-let recruitTurnCount = {}; // 本地块本回合已招募数（RECRUIT_CAP 统计）
 function recruitUnit(pid, name) {
   if (gamePhase !== "build") { showToast("行动阶段不可招募"); return; }
   if (provState[pid].owner !== picks[currentPlayerIdx]) { showToast("现在不是" + displayName(provState[pid].owner) + "的回合"); return; }
@@ -5328,10 +5408,6 @@ function recruitUnit(pid, name) {
   if (!ps) { showToast("中立地块无法招募"); return; }
   if (calcPower(f) >= 500) { if (!aiBusy) showToast("军力已达上限 500，无法继续招募"); return; } // 军力上限 500
   if (!canRecruit(s, def)) { if (!aiBusy) showToast("条件不满足：" + whyNot(s, def)); return; }
-  if (RECRUIT_CAP !== "off") {
-    const capN = RECRUIT_CAP === "A" ? ((s.city || 0) > 0 ? s.city * 2 : 1) : ((s.city || 0) + 1);
-    if ((recruitTurnCount[pid] || 0) >= capN) { if (!aiBusy) showToast("本地块本回合招募已达上限（" + capN + "）"); return; }
-  }
   const realCost = unitCostWithDiscount(f, def, s);
   if (ps.treasury < realCost) { if (!aiBusy) showToast("国库不足"); return; } // AI 回合：国库不足临时取消（静默）
   ps.treasury -= realCost;
@@ -5341,7 +5417,6 @@ function recruitUnit(pid, name) {
   // 从地块中心出生，缓动走到随机位置
   const u = makeUnit(def.kind, name, prov.center[0], prov.center[1], s.owner);
   s.units.push(u);
-  if (RECRUIT_CAP !== "off") recruitTurnCount[pid] = (recruitTurnCount[pid] || 0) + 1;
   updateProvLabelsDelta([pid]);
   const rp = randPosInProv(prov);
   animateUnitMove(u, rp.x, rp.y, aiBusy ? 150 : 420, null, prov.bounds); // AI 招募动画压缩（快速可见，不拖慢回合）
@@ -5440,7 +5515,7 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
       const devMaxed = (st.dev || 0) >= DEV_MAX; // 发展度上限 10（与 boostDev 一致）
       const dOk = gamePhase === "build" && ps.treasury >= dc && !devMaxed;
       const dWhy = devMaxed ? "已满级" : (gamePhase !== "build" ? "仅建造阶段" : (ps.treasury < dc ? "国库不足" : ""));
-      const dInc = Math.round((2 * st.city + 1) * incomeScale() * 100) / 100; // 预期增收：+1 点发展度 = (2×城市等级+1) 钱，×收入倍率
+      const dInc = Math.round((st.city + 1) * incomeScale() * 100) / 100; // 预期增收：+1 点发展度 = (城市等级+1) 钱，×收入倍率
       bh += "<button class='rbtn" + (dOk ? "" : " off") + "' onclick='boostDev(" + province.id + ")'>" + "<span class='bn'>[1] 提升发展度" + (dWhy ? "<em class='w'>" + dWhy + "</em>" : "") + "</span><span class='bp'>$+" + dInc.toFixed(1) + "　" + dc + " 钱</span></button>";
     }
     if (gamePhase === "build" && !nomadNoUp) {
@@ -5712,6 +5787,9 @@ function applyStartup() {
   if (boardMode) {
     // 桌游模式：所有地块发展度统一为 2（含中立）
     for (const p of DATA) { const s = provState[p.id]; if (s) s.dev = 2; }
+  } else {
+    // 全局最低发展度 1：0 发展度的陆地地块统一提升到 1
+    for (const p of DATA) { const s = provState[p.id]; if (s && p.is_land && (!s.dev || s.dev < 1)) s.dev = 1; }
   }
   updateProvLabels();
   recordTurnStats(null); // R1 初始统计点（收入0）
@@ -7457,8 +7535,8 @@ function _advCompute(atkFaction, srcPid, tgtPid) {
   const srcMeta = provinceById[srcPid], tgtMeta = provinceById[tgtPid];
   if (!srcSt || !tgtSt || !srcMeta || !tgtMeta) return false;
   const neutralTarget = !tgtSt.owner;
-  if (neutralTarget && !NEUTRAL_ADV) return false; // 中立守军默认不判定
-  if (!neutralTarget && tgtSt.owner === atkFaction) return false; // 只对其他玩家的地块
+  if (!neutralTarget && tgtSt.owner === atkFaction) return false; // 自己的地块不判定
+  // 中立地块照常判定：中立守军只算本地块（无接壤加成）
   const metric = ADV_MODE.indexOf("power") >= 0 ? "power" : "count";
   const tgtVal = provGarrison(tgtSt, metric);
   if (ADV_MODE.charAt(0) === "A") {
@@ -7869,7 +7947,7 @@ const TERRAIN_COLORS = {
 };
 // 地块收入（含加成）
 function provIncome(p, s) {
-  let inc = (s && s.dev ? s.dev : (p.dev || 0)) * 1 * (2 * (s ? s.city : 0) + 1); // 新版：1 点发展度 = 1 钱 ×（2×城市等级+1）
+  let inc = (s && s.dev ? s.dev : (p.dev || 0)) * 1 * ((s ? s.city : 0) + 1); // 新版：1 点发展度 = 1 钱 ×（城市等级 + 1）
   if (s && s.owner) {
     if (s.owner === "秦" && s.units.length > 0) inc += 2;
     if (s.building === "运河") inc += 3 + (s.city || 0);
@@ -9279,7 +9357,7 @@ function aiRulesDigest() {
     "【行动阶段】非骑兵单位每回合可调动1次或进攻1次；骑兵/有奔袭、机动等词条的单位可行动2次（不可连续战斗两次）。调动或进攻必须从一个地块到相邻陆地地块。",
     "【地形惩罚】攻方进攻森林/丛林/丘陵/高原-1；山地/沙漠-2；跨河/跨海-1；飞地（与首都不连通）驻军战力-1。",
     "【战斗】每个单位依次与守方一个单位单挑：双方各掷1d6，加上兵种/词条/地形修正，最终点数限制在1~10；高点获胜。步兵优先攻击步兵→骑兵→远程，骑兵优先攻击骑兵→步兵→远程，远程可自由选择目标。",
-    "【收入】每回合开始结算：单地块收入=发展度×1×(2×城市等级+1)，另加建筑/势力加成；国库上限3000。",
+    "【收入】每回合开始结算：单地块收入=发展度×1×(城市等级+1)，另加建筑/势力加成；国库上限3000。",
     "【胜利】默认占领全部城市；沙盒模式可在设置中切换胜利条件（占领全部地块/城市等）。AI 对局只使用沙盒模式。"
   ].join("\n");
 }
