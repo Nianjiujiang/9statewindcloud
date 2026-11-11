@@ -702,6 +702,11 @@ const ADV_MODE = (typeof window !== "undefined" && window.__ADV_MODE__) || "C-po
 // 军队维护费（测试用）：off | price5（兵种基础价/5） | flat2（每兵 2 钱）
 const UPKEEP_MODE = (typeof window !== "undefined" && window.__UPKEEP_MODE__) || "price5";
 
+// 招募上限（测试用）：off | A（城市等级×2，无城 1） | B（城市等级+1）
+const RECRUIT_CAP = (typeof window !== "undefined" && window.__RECRUIT_CAP__) || "off";
+// 中立守军参与兵力优势判定（中立只算本地块）
+const NEUTRAL_ADV = (typeof window !== "undefined" && window.__NEUTRAL_ADV__) === true;
+
 // 渲染层总开关：写渲染相关函数时统一在开头 `if (HZ_HEADLESS) return;`
 function renderOn() { return !HZ_HEADLESS; }
 
@@ -2353,6 +2358,7 @@ function startPhase(p, silent) {
   battleLossMerge = null; // 跨回合打断战斗损失合并
   lastAtkKey = null; lastAtkLine = -1; atkMergeUnits = null; atkDefTxt = ""; // 跨回合打断进攻行合并（骑兵二动等）
   if (p === "build") {
+    if (typeof recruitTurnCount === "object") recruitTurnCount = {};
     if (typeof histSuppress !== "undefined") histSuppress = true; // 先只写文字，finally 由「回合结算」统一提交差量
     // 回合开始：列出各国收入/军力/占领地块（每国一行）
     for (let i = 0; i < pickOrder.length; i++) {
@@ -3423,8 +3429,7 @@ function zhaoTargetsList() {
   return list;
 }
 function zhaoShow() {
-  if (zhaoUsed) { showToast("本回合已使用过均田免赋"); return; }
-  if (gamePhase !== "build") { showToast("行动阶段不可建造"); return; }
+  if (gamePhase !== "action") { showToast("只能在行动阶段招降"); return; }
   zhaoActive = !zhaoActive;
   octx.clearRect(0, 0, W, H);
   if (!zhaoActive) return;
@@ -3437,13 +3442,12 @@ function zhaoDo(pid) {
   const f = "顺";
   const ps = playerState[f];
   if (!ps) return;
-  const cost = 20 * zhaoN;
+  const cost = 20;
   if (ps.treasury < cost) { showToast("国库不足"); return; }
   ps.treasury -= cost;
   zhaoActive = false;
-  zhaoUsed = true;
   octx.clearRect(0, 0, W, H);
-  if (Math.random() * 100 < 10 * zhaoN) {
+  if (Math.random() * 100 < 16.6) {
     const prov = provinceById[pid];
     const oldOwner = provState[pid].owner;
     provState[pid].owner = f; // 地块及守军归顺
@@ -3878,7 +3882,7 @@ function updateEvoArea() {
   if (f === "顺") {
     h += "<div class='ra-title'>均田免赋</div>";
     h += "<button class='rbtn' onclick='zhaoNPlus()'>投入资金：" + (20 * zhaoN) + " 钱　成功率 " + (10 * zhaoN) + "%</button>";
-    h += "<button class='rbtn" + (zhaoUsed ? " off" : "") + "' onclick='zhaoShow()'>执行招降" + (zhaoUsed ? "（本回合已用）" : "") + "</button>";
+    h += "<button class='rbtn' onclick='zhaoShow()'>执行招降（20 钱）</button>";
   }
   // 进化区（仅未进化的游牧）
   const isNomad = f && (f === "契丹" || f === "女真" || f === "蒙古" || f === "党项");
@@ -5303,6 +5307,7 @@ function getRecruitable(faction) {
   return list;
 }
 // 招募：扣国库 + 新兵出现在地块内
+let recruitTurnCount = {}; // 本地块本回合已招募数（RECRUIT_CAP 统计）
 function recruitUnit(pid, name) {
   if (gamePhase !== "build") { showToast("行动阶段不可招募"); return; }
   if (provState[pid].owner !== picks[currentPlayerIdx]) { showToast("现在不是" + displayName(provState[pid].owner) + "的回合"); return; }
@@ -5315,6 +5320,10 @@ function recruitUnit(pid, name) {
   if (!ps) { showToast("中立地块无法招募"); return; }
   if (calcPower(f) >= 500) { if (!aiBusy) showToast("军力已达上限 500，无法继续招募"); return; } // 军力上限 500
   if (!canRecruit(s, def)) { if (!aiBusy) showToast("条件不满足：" + whyNot(s, def)); return; }
+  if (RECRUIT_CAP !== "off") {
+    const capN = RECRUIT_CAP === "A" ? ((s.city || 0) > 0 ? s.city * 2 : 1) : ((s.city || 0) + 1);
+    if ((recruitTurnCount[pid] || 0) >= capN) { if (!aiBusy) showToast("本地块本回合招募已达上限（" + capN + "）"); return; }
+  }
   const realCost = unitCostWithDiscount(f, def, s);
   if (ps.treasury < realCost) { if (!aiBusy) showToast("国库不足"); return; } // AI 回合：国库不足临时取消（静默）
   ps.treasury -= realCost;
@@ -5324,6 +5333,7 @@ function recruitUnit(pid, name) {
   // 从地块中心出生，缓动走到随机位置
   const u = makeUnit(def.kind, name, prov.center[0], prov.center[1], s.owner);
   s.units.push(u);
+  if (RECRUIT_CAP !== "off") recruitTurnCount[pid] = (recruitTurnCount[pid] || 0) + 1;
   updateProvLabelsDelta([pid]);
   const rp = randPosInProv(prov);
   animateUnitMove(u, rp.x, rp.y, aiBusy ? 150 : 420, null, prov.bounds); // AI 招募动画压缩（快速可见，不拖慢回合）
@@ -7414,7 +7424,9 @@ function _advCompute(atkFaction, srcPid, tgtPid) {
   const srcSt = provState[srcPid], tgtSt = provState[tgtPid];
   const srcMeta = provinceById[srcPid], tgtMeta = provinceById[tgtPid];
   if (!srcSt || !tgtSt || !srcMeta || !tgtMeta) return false;
-  if (!tgtSt.owner || tgtSt.owner === atkFaction) return false; // 只对其他玩家的地块
+  const neutralTarget = !tgtSt.owner;
+  if (neutralTarget && !NEUTRAL_ADV) return false; // 中立守军默认不判定
+  if (!neutralTarget && tgtSt.owner === atkFaction) return false; // 只对其他玩家的地块
   const metric = ADV_MODE.indexOf("power") >= 0 ? "power" : "count";
   const tgtVal = provGarrison(tgtSt, metric);
   if (ADV_MODE.charAt(0) === "A") {
@@ -7438,12 +7450,14 @@ function _advCompute(atkFaction, srcPid, tgtPid) {
       const st = provState[np.id];
       if (st && st.owner === atkFaction) atkSum += provGarrison(st, metric);
     }
-    for (const nm of (NEIGHBORS[tgtMeta.name] || [])) {
-      const np = provByName(nm);
-      if (!np) continue;
-      const st = provState[np.id];
-      if (st && st.owner === tgtSt.owner) defSum += provGarrison(st, metric);
-    }
+    if (!neutralTarget) {
+      for (const nm of (NEIGHBORS[tgtMeta.name] || [])) {
+        const np = provByName(nm);
+        if (!np) continue;
+        const st = provState[np.id];
+        if (st && st.owner === tgtSt.owner) defSum += provGarrison(st, metric);
+      }
+    } // 中立守军只算本地块
     return atkSum > defSum;
   }
   // B：只看出发地块（必须先与目标接壤）
