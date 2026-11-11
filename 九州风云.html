@@ -100,14 +100,19 @@ body{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f5f0e8;
 #container { position:relative;} /* 无边框无阴影：3D canvas 直接铺满，不要“框框” */
 /* 3D 全屏模式下 UI 层级（container 脱离主页面 z-index:1，这些面板需在它之上；2D 模式无影响） */
 #players { z-index:590; } #info { z-index:650; }
-#players.compact6 .pl:nth-of-type(n+7) { display:none; }
+
 #toast, #turn-banner, #drag-line, #title { z-index:400; }
 #utip { z-index:500; }
 #battle-modal { z-index:700; }
 canvas { display:block; image-rendering:pixelated; image-rendering:crisp-edges;}
 #overlay { position:absolute; top:0; left:0; pointer-events:none;}
 #info { position:fixed; bottom:20px; left:20px; background:rgba(0,0,0,0.8); color:#e6d7a8; padding:14px 20px; border-radius:6px; font-size:14px; pointer-events:none; display:none; z-index:650; min-width:360px; border:1px solid rgba(233,217,166,0.32);}
-#players { position:fixed; top:16px; left:20px; background:rgba(0,0,0,.78); padding:12px 16px; border-radius:6px; border:1px solid rgba(233,217,166,.32); color:#e6d7a8; font-size:14px; z-index:590; min-width:368px; max-height:calc(100vh - 268px); overflow-y:auto; }
+#players { position:fixed; top:16px; left:20px; background:rgba(0,0,0,.78); padding:12px 16px; border-radius:6px; border:1px solid rgba(233,217,166,.32); color:#e6d7a8; font-size:14px; z-index:590; min-width:368px; max-height:calc(100vh - 268px); overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(233,217,166,.35) transparent; scrollbar-gutter:stable; }
+#players::-webkit-scrollbar { width:8px; }
+#players::-webkit-scrollbar-track { background:rgba(255,255,255,.04); border-radius:4px; }
+#players::-webkit-scrollbar-thumb { background:rgba(233,217,166,.35); border-radius:4px; }
+#players::-webkit-scrollbar-thumb:hover { background:rgba(233,217,166,.55); }
+
 .sc-row { display:flex; gap:8px; margin:4px 0 8px; flex-wrap:wrap; justify-content:center; }
 #editor-bar { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:600; display:flex; align-items:center; gap:10px; background:rgba(20,14,8,.95); border:2px solid rgba(255,215,0,.5); border-radius:10px; padding:8px 14px; }
 .eb-title { color:#ffd700; font-size:16px; letter-spacing:2px; font-weight:bold; white-space:nowrap; }
@@ -285,6 +290,7 @@ canvas { display:block; image-rendering:pixelated; image-rendering:crisp-edges;}
 #build-area { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,215,0,.25); display:none; text-align:left; }
 #build-area .ra-title { color:#ffd700; font-size:15px; margin-bottom:6px; }
 #evo-area { margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,215,0,.25); display:none; }
+
 #evo-area .ra-title { color:#ffd700; font-size:13px; margin-bottom:4px; line-height:1.5; }
 .rbtn { display:flex; justify-content:space-between; align-items:center; width:100%; margin:4px 0; padding:6px 10px; background:#3a2a18; color:#ffd700; border:1px solid rgba(255,215,0,.4); border-radius:4px; cursor:pointer; font-size:13px; font-family:inherit; text-align:left; }
 .rbtn .bn { display:flex; align-items:center; }
@@ -2334,6 +2340,8 @@ function startPhase(p, silent) {
   // 进入回合/阶段：取消当前选中的地块（关闭省份界面）
   highlightProvince(null);
   info.classList.remove("show");
+  document.body.classList.remove("info-open");
+  { const plR = document.getElementById("players"); if (plR) plR.style.maxHeight = ""; }
   const plP = document.getElementById("players"); if (plP) plP.classList.remove("compact6");
   gamePhase = p;
   if (p === "action") resetMoves();
@@ -2384,6 +2392,8 @@ function turnClick() {
   // 点击下一回合：自动取消当前选中的地块（关闭省份界面）
   highlightProvince(null);
   info.classList.remove("show");
+  document.body.classList.remove("info-open");
+  { const plR = document.getElementById("players"); if (plR) plR.style.maxHeight = ""; }
   const plP = document.getElementById("players"); if (plP) plP.classList.remove("compact6");
   if (gameOverShown) return; // 游戏已结束，禁止操作
   if (aiBusy) return; // AI 回合中，玩家不可操作
@@ -3880,8 +3890,6 @@ function updateEvoArea() {
   }
   // 顺·均田免赋
   if (f === "顺") {
-    h += "<div class='ra-title'>均田免赋</div>";
-    h += "<div style='color:#aaa;font-size:13px;margin:4px 0'>行动阶段 · 每次 20 钱 · 成功率 16.6% · 可重复</div>";
     h += "<button class='rbtn' onclick='zhaoShow()'>执行招降（20 钱）</button>";
   }
   // 进化区（仅未进化的游牧）
@@ -5398,13 +5406,15 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
   detail += "<br>军队：" + escHtml(armyTxt);
   info.querySelector(".detail").innerHTML = detail;
   info.classList.add("show");
+  document.body.classList.add("info-open");
+  fitPlayersToInfo();
   // 省份页面打开：自己回合（人类玩家）+ 点击自己的省份 → 势力列表压缩为 6 人；点别人省份恢复全高
   const plPanel = document.getElementById("players");
   if (plPanel) {
     const curF2 = picks[currentPlayerIdx];
     const isHumanTurn2 = curF2 && playerState[curF2] && !aiBusy && (gamePhase === "build" || gamePhase === "action") && pickOrder[currentPlayerIdx] && pickOrder[currentPlayerIdx].type === "human";
     const isMyProv = st && st.owner === curF2;
-    plPanel.classList.toggle("compact6", !!(isHumanTurn2 && isMyProv));
+    // 不再隐藏第 7 行以后的玩家（列表自身可滚动）
   }
   // 建造区：仅当前玩家自己的地块（他人地块不显示建造/招募）
   const ba = document.getElementById("build-area");
@@ -5553,6 +5563,24 @@ container.addEventListener("mouseout", function(e) {
   if (e.target.classList && e.target.classList.contains("unit")) hideUnitTip();
 });
 
+
+// 按省份面板的实际顶边收缩玩家列表，避免两块重叠（内容不隐藏，超出滚动）
+function fitPlayersToInfo() {
+  const pl = document.getElementById("players");
+  const infoEl = document.getElementById("info");
+  if (!pl || !infoEl) return;
+  if (!infoEl.classList.contains("show")) { pl.style.maxHeight = ""; return; }
+  requestAnimationFrame(function () {
+    if (!infoEl.classList.contains("show")) { pl.style.maxHeight = ""; return; }
+    const pr = pl.getBoundingClientRect();
+    const top = infoEl.getBoundingClientRect().top;
+    const h = Math.max(160, Math.floor(top - pr.top - 12));
+    pl.style.maxHeight = h + "px";
+  });
+}
+window.addEventListener("resize", function () {
+  if (document.getElementById("info") && document.getElementById("info").classList.contains("show")) fitPlayersToInfo();
+});
 // ===== 剧本特殊机制（debuff）状态 =====
 let debuffState = {};
 function initDebuffs() {
@@ -6027,6 +6055,8 @@ canvas.addEventListener("contextmenu", function(e) {
   e.preventDefault();
   highlightProvince(null);
   info.classList.remove("show");
+  document.body.classList.remove("info-open");
+  { const plR = document.getElementById("players"); if (plR) plR.style.maxHeight = ""; }
   const plP3 = document.getElementById("players"); if (plP3) plP3.classList.remove("compact6");
 });
 
@@ -6139,6 +6169,8 @@ canvas.addEventListener("click", function(e) {
     if (jointActive) { jointCancel(); return; } // 联合行动中点击海洋/地图外：取消选中
     highlightProvince(null);
     info.classList.remove("show");
+  document.body.classList.remove("info-open");
+  { const plR = document.getElementById("players"); if (plR) plR.style.maxHeight = ""; }
     const plP2 = document.getElementById("players"); if (plP2) plP2.classList.remove("compact6");
     return;
   }
