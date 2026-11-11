@@ -1146,7 +1146,7 @@ function calcTransfers() {
         if (np && provState[np.id] && provState[np.id].owner === jin) { adj = true; break; }
       }
       if (!adj) continue;
-      neut += (p.dev || 0) * 1 * (s.city + 1) * (boardMode ? 1 : incomeMult); // 中立地块收入也乘倍率（与 calcIncomeRaw 一致）
+      neut += (p.dev || 0) * 2 * (s.city + 1) * (boardMode ? 1 : incomeMult); // 中立地块收入也乘倍率（与 calcIncomeRaw 一致）
     }
     tr[jin].in += Math.round(neut * 0.2 * 100) / 100; // 金朝贡：相邻和平中立地块 20%
   }
@@ -1201,7 +1201,7 @@ function calcIncomeRaw(f) {
   for (const p of DATA) {
     const s = provState[p.id];
     if (!s || s.owner !== f) continue;
-    let pi = (s.dev || p.dev || 0) * 1 * (s.city + 1); // 新版：1 点发展度 = 1 钱 ×（城市等级 + 1）
+    let pi = (s.dev || p.dev || 0) * 2 * (s.city + 1); // 新版：1 点发展度 = 2 钱 ×（城市等级 + 1）
     if (isQin && s.units.length > 0) pi += 2;
     if (s.building === "运河") pi += 3 + (s.city || 0); // 运河收入随城市等级：3+城市等级（3~7），回本更快
     inc += pi;
@@ -1543,7 +1543,7 @@ function buildEconCandidates(f, ps, own, opts) {
             if (!allShi2) continue;
             const N = 4 - (st.city || 0);
             const savedMoney = N * 10;
-            const incGain = ((st.dev || p.dev || 0) * N + (st.building === "运河" ? 1 : 0)) * incomeScale();
+            const incGain = (2 * (st.dev || p.dev || 0) * N + (st.building === "运河" ? 1 : 0)) * incomeScale();
             roi = bdef.cost / (incGain + savedMoney / 10);
           }
           eco.push({ t: "bld", roi: roi, cost: bdef.cost, pid: p.id });
@@ -1557,7 +1557,7 @@ function buildEconCandidates(f, ps, own, opts) {
       if (st.city >= 1 && st.city < 4) {
         let cost = 20 - (st.building === "市舶司" ? 10 : 0);
         if (isLiao(f) && liaoNorth === false) cost -= 5;
-        let roi = (st.dev || 0) > 0 ? cost / (((st.dev || 0) + (st.building === "运河" ? 1 : 0)) * incomeScale()) * 0.6 : 999;
+        let roi = (st.dev || 0) > 0 ? cost / ((2 * (st.dev || 0) + (st.building === "运河" ? 1 : 0)) * incomeScale()) * 0.6 : 999;
         if (capProv && p.id === capProv.id && aiThreat(p.id, f) > 0) roi = roi * 0.5;
         eco.push({ t: "city", roi: roi, cost: cost, pid: p.id });
       }
@@ -1569,7 +1569,7 @@ function buildEconCandidates(f, ps, own, opts) {
       let cost = 20 + (isNomadFaction(f) && f !== "党项" ? 5 : 0) - (st.building === "市舶司" ? 10 : 0);
       if (f === "明" && isMingBuffCap() && provinceById[p.id].name === (mutableCapital["明"] || CAPITAL_MAP["明"])) cost -= 5;
       if (st.building === "行宫") cost -= 20;
-      const roiCity = (st.dev || 0) > 0 ? 20 / ((st.dev || 0) * incomeScale()) * 0.5 : 999;
+      const roiCity = (st.dev || 0) > 0 ? 20 / (2 * (st.dev || 0) * incomeScale()) * 0.5 : 999;
       eco.push({ t: "city", roi: roiCity, cost: cost, pid: p.id });
     }
   }
@@ -1580,12 +1580,12 @@ function buildEconCandidates(f, ps, own, opts) {
       if (opts.devBatch5) {
         const r5 = devCostTotal5(p, st, f);
         if (r5.times > 0) {
-          const gain = (st.city + 1) * r5.times * incomeScale();
+          const gain = 2 * (st.city + 1) * r5.times * incomeScale();
           eco.push({ t: "dev", roi: gain > 0 ? r5.cost / gain : 999, cost: r5.cost, pid: p.id, times: r5.times });
         }
       } else {
         const cost = devCost(p, st, f);
-        const gain = (st.city + 1) * incomeScale();
+        const gain = 2 * (st.city + 1) * incomeScale();
         eco.push({ t: "dev", roi: gain > 0 ? cost / gain : 999, cost: cost, pid: p.id });
       }
     }
@@ -2285,7 +2285,7 @@ function aiBuildTurn() {
           const pm = provByName(nm); if (!pm) continue;
           const sm = provState[pm.id];
           if (!sm || sm.owner !== "明") continue;
-          const val = (sm.dev || 0) * (sm.city + 1);
+          const val = (sm.dev || 0) * 2 * (sm.city + 1);
           if (val > bestValM) { bestValM = val; bestM = pm; }
         }
         if (bestM && bestM.name !== curM) { mingMoveCapital(bestM.id); return setTimeout(aiBuildStep, 15); }
@@ -5515,7 +5515,7 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
       const devMaxed = (st.dev || 0) >= DEV_MAX; // 发展度上限 10（与 boostDev 一致）
       const dOk = gamePhase === "build" && ps.treasury >= dc && !devMaxed;
       const dWhy = devMaxed ? "已满级" : (gamePhase !== "build" ? "仅建造阶段" : (ps.treasury < dc ? "国库不足" : ""));
-      const dInc = Math.round((st.city + 1) * incomeScale() * 100) / 100; // 预期增收：+1 点发展度 = (城市等级+1) 钱，×收入倍率
+      const dInc = Math.round(2 * (st.city + 1) * incomeScale() * 100) / 100; // 预期增收：+1 点发展度 = 2×(城市等级+1) 钱，×收入倍率
       bh += "<button class='rbtn" + (dOk ? "" : " off") + "' onclick='boostDev(" + province.id + ")'>" + "<span class='bn'>[1] 提升发展度" + (dWhy ? "<em class='w'>" + dWhy + "</em>" : "") + "</span><span class='bp'>$+" + dInc.toFixed(1) + "　" + dc + " 钱</span></button>";
     }
     if (gamePhase === "build" && !nomadNoUp) {
@@ -7947,7 +7947,7 @@ const TERRAIN_COLORS = {
 };
 // 地块收入（含加成）
 function provIncome(p, s) {
-  let inc = (s && s.dev ? s.dev : (p.dev || 0)) * 1 * ((s ? s.city : 0) + 1); // 新版：1 点发展度 = 1 钱 ×（城市等级 + 1）
+  let inc = (s && s.dev ? s.dev : (p.dev || 0)) * 2 * ((s ? s.city : 0) + 1); // 新版：1 点发展度 = 2 钱 ×（城市等级 + 1）
   if (s && s.owner) {
     if (s.owner === "秦" && s.units.length > 0) inc += 2;
     if (s.building === "运河") inc += 3 + (s.city || 0);
@@ -9357,7 +9357,7 @@ function aiRulesDigest() {
     "【行动阶段】非骑兵单位每回合可调动1次或进攻1次；骑兵/有奔袭、机动等词条的单位可行动2次（不可连续战斗两次）。调动或进攻必须从一个地块到相邻陆地地块。",
     "【地形惩罚】攻方进攻森林/丛林/丘陵/高原-1；山地/沙漠-2；跨河/跨海-1；飞地（与首都不连通）驻军战力-1。",
     "【战斗】每个单位依次与守方一个单位单挑：双方各掷1d6，加上兵种/词条/地形修正，最终点数限制在1~10；高点获胜。步兵优先攻击步兵→骑兵→远程，骑兵优先攻击骑兵→步兵→远程，远程可自由选择目标。",
-    "【收入】每回合开始结算：单地块收入=发展度×1×(城市等级+1)，另加建筑/势力加成；国库上限3000。",
+    "【收入】每回合开始结算：单地块收入=发展度×2×(城市等级+1)，另加建筑/势力加成；国库上限3000。",
     "【胜利】默认占领全部城市；沙盒模式可在设置中切换胜利条件（占领全部地块/城市等）。AI 对局只使用沙盒模式。"
   ].join("\n");
 }
