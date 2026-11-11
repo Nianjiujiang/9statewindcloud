@@ -377,8 +377,7 @@ canvas { display:block; image-rendering:pixelated; image-rendering:crisp-edges;}
 
 /* 等级徽标：城市等级(金) 与 发展度罗马数字(淡蓝) 分开着色 */
 .prov-label .plv-city { color:#f0dc9a; }
-.prov-label .plv-sep { display:inline-block; width:3px; height:3px; margin:0 4px; border-radius:50%; background:currentColor; opacity:.75; font-size:0; line-height:0; vertical-align:middle; }
-.prov-label .plv-tier { color:#ffffff; text-shadow: 0 0 2px #000, 0 0 4px rgba(0,0,0,.55); }
+.prov-label .plv-tier { margin-right:5px; color:#ffffff; text-shadow: 0 0 2px #000, 0 0 4px rgba(0,0,0,.55); }
 /* 经济/地形视图：地名下方标注（提升价格 / 地形战力惩罚），黑底仿小兵标签模式 */
 .prov-label .plv-dev { display:block; font-size:10px; font-weight:normal; color:#e8e6ee; text-align:center; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.28); border-radius:6px; padding:1px 6px; text-shadow: 0 0 2px #000; margin-top:1px; }
 .prov-label .plv-dev:empty { display:none; } /* 无内容时隐藏黑底条 */
@@ -671,9 +670,6 @@ html, body { height:100%; overscroll-behavior:none; }
     <div id="chronicle-list"></div>
     <div class="cm-btns">
       <button class="sbtn" style="width:auto;padding:8px 16px" onclick="exportChronicle()">⬇ 导出史料</button>
-      <button class="sbtn" style="width:auto;padding:8px 16px" onclick="restoreFromChronicle()" title="按史官记载把存档还原到最新状态">⟲ 按史料还原</button>
-      <button class="sbtn" style="width:auto;padding:8px 16px" onclick="document.getElementById('hist-import-file').click()">📜 载入状态史</button>
-      <input type="file" id="hist-import-file" accept=".txt,.json" style="display:none" onchange="importChronicleState(this)">
       <button class="sbtn" style="width:auto;padding:8px 16px" onclick="closeChronicle()">关闭</button>
     </div>
   </div>
@@ -981,7 +977,7 @@ function updateProvNotes() {
     if (mapView === "dev") {
       if (s2.dev >= DEV_MAX) { el.textContent = "已满"; continue; }
       const dp = devCost(p2, s2, s2.owner); // 提升 1 点价格
-      el.textContent = "dev" + s2.dev + " · " + dp + " 钱"; // 发展度 + 提升价格（与建造按钮格式一致）
+      el.textContent = "dev" + s2.dev + "　" + dp + " 钱"; // 发展度 + 提升价格（与建造按钮格式一致）
     } else if (mapView === "income") {
       el.textContent = "+" + (Math.round(provIncome(p2, s2) * 10) / 10).toFixed(1) + "/T"; // 地块收入（回合金，一位小数）
     } else if (mapView === "military") {
@@ -991,6 +987,18 @@ function updateProvNotes() {
       el.textContent = "";
     }
   }
+}
+// 地块名下的等级/城市徽标（统一格式：等级 城市，无间隔圆点）
+function provLabelMetaHtml(s, showTier) {
+  const ROMAN_TIER = ["N", "Ⅰ","Ⅱ","Ⅲ","Ⅳ","Ⅴ","Ⅵ","Ⅶ","Ⅷ","Ⅸ","Ⅹ"];
+  const devTier = (s && s.dev) ? s.dev : 0;
+  const tierTxt = (showTier && s && s.owner && devTier > 0) ? ROMAN_TIER[Math.min(10, devTier)] : "";
+  const cityTxt = (s && s.owner && s.city > 0) ? "Lv" + s.city : "";
+  let html = "";
+  if (tierTxt) html += '<span class="plv-tier">' + tierTxt + '</span>';
+  if (tierTxt && cityTxt) html += ' ';
+  if (cityTxt) html += '<span class="plv-city">' + cityTxt + '</span>';
+  return html;
 }
 function updateProvLabels() {
   if (HZ_HEADLESS) return;
@@ -1010,7 +1018,7 @@ function updateProvLabels() {
       const ROMAN_TIER = ["N", "Ⅰ","Ⅱ","Ⅲ","Ⅳ","Ⅴ","Ⅵ","Ⅶ","Ⅷ","Ⅸ","Ⅹ"]; // 发展度 0–10 直接用档位；0档=N(nulla)
       const tierTxt = (s && s.owner && devTier > 0) ? ROMAN_TIER[Math.min(10, devTier)] : "";
       const cityTxt = (s && s.owner && s.city > 0) ? "Lv" + s.city : "";
-      lv.innerHTML = (tierTxt ? '<span class="plv-tier">' + tierTxt + '</span>' : '') + (tierTxt && cityTxt ? '<span class="plv-sep">·</span>' : '') + (cityTxt ? '<span class="plv-city">' + cityTxt + '</span>' : '');
+      lv.innerHTML = provLabelMetaHtml(s, true);
     }
     // 首都名字加粗
     const pn = l.querySelector(".pname");
@@ -2345,6 +2353,7 @@ function startPhase(p, silent) {
   battleLossMerge = null; // 跨回合打断战斗损失合并
   lastAtkKey = null; lastAtkLine = -1; atkMergeUnits = null; atkDefTxt = ""; // 跨回合打断进攻行合并（骑兵二动等）
   if (p === "build") {
+    if (typeof histSuppress !== "undefined") histSuppress = true; // 先只写文字，finally 由「回合结算」统一提交差量
     // 回合开始：列出各国收入/军力/占领地块（每国一行）
     for (let i = 0; i < pickOrder.length; i++) {
       const f = picks[i]; // picks 是按座位索引的势力名对象
@@ -2352,6 +2361,7 @@ function startPhase(p, silent) {
       chronicle.push(factionSummaryLine(f));
     }
     if (neutralRefreshLog.length) { chronicleAdd("中立 刷新：" + neutralRefreshLog.join("、")); neutralRefreshLog = []; } // 中立刷兵入史官
+    if (typeof histSuppress !== "undefined") histSuppress = false;
   }
   // 自动围圈已取消（行动阶段不再自动围圈）
   // 阶段边界本身也是一次"操作"：回合结算（收入/中立刷兵/关系衰减）与阶段切换的差量归属到它，
@@ -3276,12 +3286,16 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     if (participated.indexOf(atkU) < 0) participated.push(atkU); // 实际参战（死战续战去重）
     SFX.dice();
     const advAtk = hasTroopAdvantage(src.owner, srcPid, tgtPid); // 兵力优势：每轮单挑前实时判定
-    const d1 = advAtk ? Math.max(1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)) : 1 + Math.floor(Math.random() * 6);
+    // 兵力优势掷两次取高：史官记录「大/小」两个原始骰子
+    const _rollA = 1 + Math.floor(Math.random() * 6);
+    const _rollB = advAtk ? 1 + Math.floor(Math.random() * 6) : 0;
+    const d1 = advAtk ? Math.max(_rollA, _rollB) : _rollA;
+    const d1txt = advAtk ? d1 + "/" + Math.min(_rollA, _rollB) : null;
     const d2 = 1 + Math.floor(Math.random() * 6);
     const bm = calcBattleMods(atkU, defU, src, dst, tgt, atkProv);
     const a = Math.max(1, Math.min(10, d1 + bm.atk.total));
     const b = Math.max(1, Math.min(10, d2 + bm.def.total));
-    const vs = atkU.name + " 【" + a + "】=" + fmtBattlePoint(d1, bm.atk) + " vs " + defU.name + " 【" + b + "】=" + fmtBattlePoint(d2, bm.def); // 战斗行不写国家名（进攻行已写明）
+    const vs = atkU.name + " 【" + a + "】=" + fmtBattlePoint(d1txt != null ? d1txt : d1, bm.atk) + " vs " + defU.name + " 【" + b + "】=" + fmtBattlePoint(d2, bm.def); // 战斗行不写国家名（进攻行已写明）
     atkU.moves--; atkU.atk--; // 攻击消耗：1调动+1攻击点
     const dq = C[src.owner];
     if (a > b) {
@@ -3339,9 +3353,9 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     lastAtkKey = atkKey;
     lastAtkLine = -1; // 联合进攻行不做单兵重写（防误覆盖）
   }
-  for (const r of reports) chronicleAdd(r);
+  for (const r of reports) chronicleAdd(r.replace("　└ 战斗：", "　└ 战斗：" + tgt.name + " "));
   function lossTxt(o) { const ks = Object.keys(o); return ks.length ? ks.map(function(k) { return k + "×" + o[k]; }).join("、") : "无"; }
-  chronicleAdd("损失：攻方 " + lossTxt(atkLoss) + "，守方 " + lossTxt(defLoss)); // 整场战斗双方损失（兵种，独立行）
+  chronicleAdd("损失：" + atkProv.name + "→" + tgt.name + " 攻方 " + lossTxt(atkLoss) + "，守方 " + lossTxt(defLoss)); // 整场战斗双方损失（兵种，独立行）
   // 占领记录（含绿营军收编）放在战斗/损失之后
   if (captured) {
     chronicleAdd(displayName(src.owner) + " 占领 " + tgt.name + (defOwner && isGreenCamp(src.owner) ? "，收编一队步兵" : ""));
@@ -3440,7 +3454,7 @@ function zhaoDo(pid) {
     updatePlayersPanel();
     SFX.coin();
     showToast("招降成功！" + prov.name + " 归顺（-" + cost + " 钱）");
-    chronicleAdd(displayName(f) + " 招降 " + (oldOwner ? displayName(oldOwner) + " " : "中立 ") + prov.name + "（-" + cost + " 钱）");
+    chronicleAdd(displayName(f) + " 招降 " + (oldOwner ? displayName(oldOwner) + " " : "中立 ") + prov.name + "（驻军 " + ((provState[prov.id] && provState[prov.id].units.length) || 0) + "，-" + cost + " 钱）");
     checkEliminations();
     recordReplayFrame();
   } else {
@@ -3676,7 +3690,7 @@ function applyLoadedSave(d) {
       for (const k in d.playerState) {
         const v = d.playerState[k];
         if (!(k in C) || !v || typeof v !== "object") continue;
-        safePlayers[k] = Object.assign({}, v, { treasury: Math.max(0, Math.min(TREASURY_CAP, Number(v.treasury) || 0)) });
+        safePlayers[k] = Object.assign({}, v, { treasury: Math.max(-TREASURY_CAP, Math.min(TREASURY_CAP, Number(v.treasury) || 0)) });
       }
     }
     for (const k in playerState) delete playerState[k];
@@ -4227,7 +4241,7 @@ function escChronicleHtml(s) {
 function openChronicle() {
   const el = document.getElementById("chronicle-list");
   const hasHist = typeof historyCount === "function" && historyCount() > 0;
-  const histInfo = hasHist ? "<div style='color:#a08060;font-size:12px;margin-bottom:6px'>状态史：已记录 " + historyCount() + " 条 · 与导出文本同一套排版，可用下方「按史料还原」回档</div>" : "";
+  const histInfo = hasHist ? "<div style='color:#a08060;font-size:12px;margin-bottom:6px'>操作记录：已记录 " + historyCount() + " 条 · 与导出文本同一套排版</div>" : "";
   let body = "";
   if (hasHist && typeof buildChronicleText === "function") {
     // 预览与导出共用 buildChronicleText()，保证逐行一致
@@ -4254,10 +4268,8 @@ function exportChronicle() {
   let t = hasHist
     ? buildChronicleText()
     : ["九州风云 战报", "回合数：" + currentTurn, "--------------------------------", ""].join("\n") + chronicle.map(function(c) { return splitDiplomacyHeader(c); }).join("\n");
-  // 附带「状态史」：只靠这份史料就能还原出存档
-  if (typeof histExport === "function" && histBase) {
-    t += "\n\n=====状态史=====\n" + JSON.stringify(histExport());
-  }
+  // 状态史不再写进导出文本：每回合开局已记录全部地块的归属/城市/发展度/建筑/驻军，
+  // 正文即可完整反映局面，避免末尾一大段 JSON 影响阅读。
   downloadText("九州风云_史料.txt", "\ufeff" + t); // 纯文本史官（读史直接解析文本，无需回放段）
 }
 
@@ -4569,7 +4581,7 @@ function parseReplayText(raw) {
     const _m0 = line.match(/^(.+?) 军力突破 .*消除$/);
     if (_m0) { const _df = revName[_m0[1]] || _m0[1]; if (_debNow[_df]) _debNow[_df].wubei = false; }
     // 是否仍处于「进攻 → 战斗行/损失行 → 占领行」序列；离开序列的行先结算兜底伤害并清理上下文
-    const inBattleSeq = line.indexOf("└ 战斗：") >= 0 || line.indexOf("损失：攻方 ") >= 0 || /^(.+?) (?:顺势)?占领 /.test(line);
+    const inBattleSeq = line.indexOf("└ 战斗：") >= 0 || line.indexOf("损失：") >= 0 || /^(.+?) (?:顺势)?占领 /.test(line);
     if (!inBattleSeq && _atkPending) { applyFallbackDamage(); clearAttack(); }
     let m;
     // 回合头
@@ -4699,7 +4711,7 @@ function parseReplayText(raw) {
     // 战斗结果行：　└ 战斗：...——记录逐场结果；有损失行时以损失行为准，无损失行时序列结束时规则兜底
     m = line.match(/└ 战斗：.*?(攻方胜|攻方败|平局(?:[，·](?:守方)?叛逃)?)/);
     if (m && _atkPending) {
-      const um = line.match(/└ 战斗：(.+?) 【[^】]*】.*? vs (.+?) 【/);
+      const um = line.match(/└ 战斗：(?:S+ )?(.+?) 【[^】]*】.*? vs (.+?) 【/);
       const atkUnit = um ? battleUnitName(um[1]) : "";
       const defUnit = um ? battleUnitName(um[2]) : "";
       const result = m[1];
@@ -4715,7 +4727,7 @@ function parseReplayText(raw) {
       continue;
     }
     // 损失行：精确减员（兼容旧「　└ 损失」与新「损失」；单兵连击的损失行是累计值，可能先于后续战斗行出现）
-    m = line.match(/[　 ]*└? *损失：攻方 (.+?)，守方 (.+)$/);
+    m = line.match(/[　 ]*└? *损失：(?:S+→S+ )?攻方 (.+?)，守方 (.+)$/);
     if (m && _atkPending) {
       if (m[1] !== "无") _removeUnits(_atkPending.srcPid, m[1]);
       if (m[2] !== "无") _removeUnits(_atkPending.defPid, m[2]);
@@ -4812,7 +4824,7 @@ function renderReplayLabels() {
       const devTier = (s && s.dev) ? s.dev : 0; // 发展度 0–10 直接作为罗马档位
       const tierTxt = ((replayFullState || !replayMode) && s && s.owner) ? ROMAN_TIER[Math.min(10, devTier)] : ""; // 新格式读史带发展度：显示罗马数字
       const cityTxt = (s && s.owner && s.city > 0) ? "Lv" + s.city : "";
-      lv.innerHTML = (tierTxt ? '<span class="plv-tier">' + tierTxt + '</span>' : '') + (tierTxt && cityTxt ? '<span class="plv-sep">·</span>' : '') + (cityTxt ? '<span class="plv-city">' + cityTxt + '</span>' : '');
+      lv.innerHTML = provLabelMetaHtml(s, (replayFullState || !replayMode));
     }
     const pn = l.querySelector(".pname");
     if (pn) {
@@ -7535,9 +7547,9 @@ function calcBattleMods(atkUnit, defUnit, src, dst, tgt, atkProv) {
 }
 
 // 战斗点数文案：显示钳制后的总点数，若被保底/封顶则注明原值
-function battleScoreText(dice, R, total) {
+function battleScoreText(dice, R, total, diceTxt) {
   const raw = dice + (R && typeof R.total === "number" ? R.total : 0);
-  let s = "【" + total + "】=" + fmtBattlePoint(dice, R);
+  let s = "【" + total + "】=" + fmtBattlePoint(diceTxt != null ? diceTxt : dice, R);
   if (raw !== total) s += "（原值 " + raw + "，" + (raw > 10 ? "封顶 10" : "保底 1") + "）";
   return s;
 }
@@ -7556,7 +7568,12 @@ function doBattle() {
   if (!defUnit) { closeBattleModal(); return; }
 
   const advAtk = hasTroopAdvantage(src.owner, atkF.prov.id, b.defPid); // 兵力优势：每次战斗前实时判定
-  const d1 = advAtk ? Math.max(1 + Math.floor(Math.random()*6), 1 + Math.floor(Math.random()*6)) : 1 + Math.floor(Math.random()*6);
+  // 兵力优势掷两次取高：史官记录「大/小」两个原始骰子，方便复盘
+  const _rollA = 1 + Math.floor(Math.random()*6);
+  const _rollB = advAtk ? 1 + Math.floor(Math.random()*6) : 0;
+  const d1 = advAtk ? Math.max(_rollA, _rollB) : _rollA;
+  const d1txt = advAtk ? d1 + "/" + Math.min(_rollA, _rollB) : null;
+  b.d1txt = d1txt; // 传给 resolveBattle（超时回调不在 doBattle 作用域内）
   const d2 = 1 + Math.floor(Math.random()*6);
   const atkKey2 = atkF.prov.id + ">" + b.defPid + ">" + (src.owner || "");
   if (lastAtkKey !== atkKey2) { // 联合进攻总览行已写则跳过（连续同源同目标只写一次进攻行）
@@ -7615,7 +7632,7 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
   const bmR = calcBattleMods(atkUnit, defUnit, src, dst, b.tgt, atkHome ? atkHome.prov : src);
   // 绿营军（女真→清）：平局时若对方非最后一个守军，该单位叛逃至己方
   const defCanDefect = !!(C[src.owner] && evolved[src.owner] === "evolved2" && C[src.owner].evolved2 && C[src.owner].evolved2.trait === "绿营军" && dst.units.length > 1);
-  chronicleAdd("　└ 战斗：" + atkUnit.name + " " + battleScoreText(d1, bmR.atk, atkTotal) + " vs " + (defUnit ? defUnit.name : "") + " " + battleScoreText(d2, bmR.def, defTotal) + "，" + (atkTotal > defTotal ? "攻方胜" : atkTotal < defTotal ? "攻方败" : (defCanDefect ? "平局，守方叛逃" : "平局")));
+  chronicleAdd("　└ 战斗：" + b.tgt.name + " " + atkUnit.name + " " + battleScoreText(d1, bmR.atk, atkTotal, b.d1txt) + " vs " + (defUnit ? defUnit.name : "") + " " + battleScoreText(d2, bmR.def, defTotal) + "，" + (atkTotal > defTotal ? "攻方胜" : atkTotal < defTotal ? "攻方败" : (defCanDefect ? "平局，守方叛逃" : "平局")));
   let defected = null; // 绿营军叛逃单位
   if (atkTotal > defTotal) { result = "攻方胜"; defAlive = false; }
   else if (atkTotal < defTotal) { result = "守方胜"; atkAlive = false; }
@@ -7636,12 +7653,12 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
   if (battleLossMerge && battleLossMerge.srcOwner === src.owner && battleLossMerge.srcId === srcProvB.id && battleLossMerge.tgtId === (b.tgt ? b.tgt.id : -1)) {
     if (atkLostB) battleLossMerge.atk[atkLostB.name] = (battleLossMerge.atk[atkLostB.name] || 0) + 1;
     if (defLostB) battleLossMerge.def[defLostB.name] = (battleLossMerge.def[defLostB.name] || 0) + 1;
-    chronicle[battleLossMerge.line] = "损失：攻方 " + lossLineTxt(battleLossMerge.atk) + "，守方 " + lossLineTxt(battleLossMerge.def); // 更新记录的损失行
+    chronicle[battleLossMerge.line] = "损失：" + battleLossMerge.route + " 攻方 " + lossLineTxt(battleLossMerge.atk) + "，守方 " + lossLineTxt(battleLossMerge.def); // 更新记录的损失行
   } else {
-    battleLossMerge = { srcOwner: src.owner, srcId: srcProvB.id, tgtId: b.tgt ? b.tgt.id : -1, atk: {}, def: {} };
+    battleLossMerge = { srcOwner: src.owner, srcId: srcProvB.id, tgtId: b.tgt ? b.tgt.id : -1, atk: {}, def: {}, route: (srcProvB.name || "?") + "→" + (b.tgt ? b.tgt.name : "?") };
     if (atkLostB) battleLossMerge.atk[atkLostB.name] = 1;
     if (defLostB) battleLossMerge.def[defLostB.name] = 1;
-    chronicleAdd("损失：攻方 " + lossLineTxt(battleLossMerge.atk) + "，守方 " + lossLineTxt(battleLossMerge.def));
+    chronicleAdd("损失：" + battleLossMerge.route + " 攻方 " + lossLineTxt(battleLossMerge.atk) + "，守方 " + lossLineTxt(battleLossMerge.def));
     battleLossMerge.line = chronicle.length - 1; // 记录损失行索引
   }
 
@@ -9651,7 +9668,8 @@ let histBaseChronicle = [];     // 基准时的史官文本（旧史料还原时
 let histExactChronicle = false; // 新史料带 chronicle 差量，可精确还原文字史；旧史料只能近似拼
 let histEntries = [];           // [{turn, phase, label, delta}]
 let histSnap = null;            // 最近一次提交后的快照
-let histGuard = false;          // 还原期间禁止记录，防自己记自己
+let histGuard = false;
+let histSuppress = false; // 结算块内只记文字，差量留给「回合结算」统一提交          // 还原期间禁止记录，防自己记自己
 let histImported = null;        // 从史料文件导入、尚未还原的状态史
 
 const HIST_G_SKIP = { provState: 1, playerState: 1, chronicle: 1 };
@@ -9754,6 +9772,7 @@ function historyStart() {
 
 // 记录一步：不传 label 时用当前回合/阶段自动生成
 function historyCommit(label, alwaysNarrative) {
+  if (histSuppress) return;
   if (histGuard) return;
   if (!histBase) { historyStart(); return; }
   const cur = histSnapshot();
@@ -9839,7 +9858,15 @@ function importChronicleState(input) {
       const MARK = "=====状态史=====";
       const raw = String(rd.result || "");
       const i = raw.indexOf(MARK);
-      if (i < 0) throw new Error("这份史料没有状态史数据（旧版导出的纯文本无法还原存档）");
+      if (i < 0) {
+        if (!/═+ 第 \d+ 回合 ═+/.test(raw)) throw new Error("这份史料既没有状态史，也没有回合段落，无法还原");
+        if (!confirm("按史料里的回合开局还原（默认最后一回合），当前进度会丢失。继续？")) { input.value = ""; return; }
+        const parsedSave = restoreFromChronicleText(raw);
+        showToast("已按史料还原到第 " + parsedSave.currentTurn + " 回合开局");
+        closeChronicle();
+        input.value = "";
+        return;
+      }
       histImport(JSON.parse(raw.slice(i + MARK.length)));
       if (!confirm("史料里有 " + histEntries.length + " 条记载，将还原到最新状态，当前进度会丢失。继续？")) return;
       const n = histEntries.length;
@@ -9892,6 +9919,25 @@ function histFactionRows(snap) {
   });
 }
 
+// 每回合开局的全地块快照：归属、城市等级、发展度、建筑、驻军
+function histProvinceRows(snap) {
+  const rows = [];
+  const list = (typeof DATA !== "undefined" && DATA) ? DATA : [];
+  for (const p of list) {
+    if (!p.is_land) continue; // 海洋、荒漠等非陆地块不写入史料
+    const e = snap.p[p.id];
+    const o = (e && e[0]) ? displayName(e[0]) : "无主";
+    const city = (e && e[1]) ? e[1] + " 级" : "—";
+    const dev = (e && e[2] !== "" && e[2] != null) ? e[2] : "—";
+    const bld = (e && e[3]) ? e[3] : "—";
+    const cnt = {};
+    ((e && e[4]) || []).forEach(function(u) { cnt[u.name] = (cnt[u.name] || 0) + 1; });
+    const troop = Object.keys(cnt).map(function(k) { return k + "×" + cnt[k]; }).join("、") || "—";
+    rows.push("　" + p.name + "　" + o + "　城市 " + city + "　发展度 " + dev + "　建筑 " + bld + "　驻军 " + troop);
+  }
+  return rows;
+}
+
 function histPad2(s) { s = String(s); return s.length >= 2 ? s : "　" + s; } // 全角空格对齐
 
 function buildChronicleText() {
@@ -9900,21 +9946,41 @@ function buildChronicleText() {
   const sc = (typeof SCENARIOS !== "undefined" && SCENARIOS[scenarioId]) ? SCENARIOS[scenarioId].name : "自定义剧本";
   out.push("九州风云 · 史官战报");
   out.push("剧本：" + sc + "　规则版本：2");
+  out.push("模式：" + (scenarioId === "sandbox" ? "沙盒" : "剧本") + "　桌游：" + (boardMode ? "是" : "否") + "　收入倍率：" + incomeMult);
   out.push("回合数：" + currentTurn);
+  out.push("座位：" + histSeatRows(histBase));
   out.push("");
   let snap = histClone(histBase);
-  let curTurnNo = null, curPhase = null, pendingPhase = null;
-  for (const e of histEntries) {
+  let curTurnNo = null, curPhase = null, pendingPhase = null, settledEntry = null, preludeStart = -1;
+  for (let i = 0; i < histEntries.length; i++) {
+    const e = histEntries[i];
     if (e.turn !== curTurnNo) {
-      curTurnNo = e.turn; curPhase = null; pendingPhase = null;
+      curTurnNo = e.turn; curPhase = null; pendingPhase = null; settledEntry = null; preludeStart = -1;
+      // 回合开局 = 本回合「回合结算」以及它之前的叙述条目（中立刷新等）全部应用后的状态。
+      // 这些条目在文本里不再重复显示（【地块】已经反映结果）。
+      let preludeEnd = -1;
+      for (let j = i; j < histEntries.length && histEntries[j].turn === e.turn; j++) {
+        if (/^回合结算/.test(String(histEntries[j].label || ""))) { preludeEnd = j; break; }
+      }
+      if (preludeEnd >= i) {
+        for (let j = i; j <= preludeEnd; j++) histApply(snap, histEntries[j].delta);
+        settledEntry = histEntries[preludeEnd];
+        preludeStart = i;
+      }
       out.push("═══════ 第 " + curTurnNo + " 回合 ═══════");
       out.push("【开局】");
       for (const r of histFactionRows(snap)) {
-        out.push("　" + histPad2(r.name) + "　国库 " + r.treasury.toFixed(2) + "　占地 " + r.provs + "　城市 " + r.city + " 级　兵力 " + r.units + "　发展度 " + r.dev + (r.dead ? "　（已灭亡）" : ""));
+        const capNm = (snap.g.mutableCapital && snap.g.mutableCapital[r.f]) ? snap.g.mutableCapital[r.f] : (typeof CAPITAL_MAP !== "undefined" ? CAPITAL_MAP[r.f] : "");
+        out.push("　" + histPad2(r.name) + "　国库 " + r.treasury.toFixed(2) + "　占地 " + r.provs + "　城市 " + r.city + " 级　兵力 " + r.units + "　发展度 " + r.dev + "　首都 " + (capNm || "—") + (r.dead ? "　（已灭亡）" : ""));
       }
+      const dipLines = histDiploSection(snap);
+      if (dipLines.length) { out.push("【外交】"); for (const dl of dipLines) out.push(dl); }
+      out.push("【地块】");
+      for (const r of histProvinceRows(snap)) out.push(r);
     }
     if (e.phase !== curPhase) { curPhase = e.phase; pendingPhase = e.phase; }
-    // 阶段结算条目只更新状态，不当作玩家行动显示
+    // 结算条目只更新状态，不当作玩家行动显示（顶层的【开局】已包含它的结果）
+    if (i >= preludeStart && i <= histEntries.indexOf(settledEntry)) continue;
     if (String(e.label || "") === "阶段快照") { histApply(snap, e.delta); continue; }
     if (pendingPhase) { out.push(pendingPhase === "action" ? "【行动】" : "【建造】"); pendingPhase = null; }
     const line = String(e.label || "").replace(/^[s　]+/, "");
@@ -9923,6 +9989,271 @@ function buildChronicleText() {
   }
   if (!out.length) return "";
   return out.join("\n");
+}
+
+
+// 回合开局的座位（谁是人类/电脑），用于从文本还原
+function histSeatRows(snap) {
+  const parts = [];
+  const picks = (snap.g && snap.g.picks) || {};
+  const types = (snap.g && snap.g.seatTypes) || [];
+  for (const k in picks) {
+    const f = picks[k];
+    if (!f) continue;
+    const po = (snap.g && snap.g.pickOrder) || [];
+    const nm = (po[k] && po[k].name) ? po[k].name : ("玩家" + (Number(k) + 1));
+    parts.push((typeof displayName === "function" ? displayName(f) : f) + "（" + nm + "·" + (types[k] === "human" ? "人类" : "电脑") + "）");
+  }
+  return parts.length ? parts.join("、") : "—";
+}
+
+function histParseSeat(s) {
+  let q = s.match(/^(.+?)（(.+?)·(人类|电脑)）$/);
+  if (q) return { faction: q[1], name: q[2], human: q[3] === "人类" };
+  q = s.match(/^(.+?)（(人类|电脑)）$/);
+  return q ? { faction: q[1], name: "", human: q[2] === "人类" } : null;
+}
+
+// 文本 -> 结构化回合块（只认新格式；缺字段的旧行忽略）
+function histParseChronicle(raw) {
+  const lines = String(raw || "").replace(/\r/g, "").split("\n");
+  const out = { scenario: "", sandbox: true, board: false, mult: 1, seats: null, turns: [] };
+  let cur = null;
+  for (const ln of lines) {
+    if (!ln) continue;
+    let m;
+    if ((m = ln.match(/^剧本：(.+?)　规则版本：2/))) { out.scenario = m[1].trim(); continue; }
+    if ((m = ln.match(/^模式：(.+?)　桌游：(是|否)　收入倍率：([\d.]+)/))) { out.sandbox = m[1] === "沙盒"; out.board = m[2] === "是"; out.mult = Number(m[3]) || 1; continue; }
+    // 座位行（无「座位：」前缀），形如「宋（玩家1·人类）、契丹（玩家2·电脑）」
+    if (/^　.*（[^（）]*·(人类|电脑)）/.test(ln) || /^　.*（(人类|电脑)）/.test(ln)) {
+      out.seats = ln.replace(/^　/, "").split("、").map(histParseSeat).filter(Boolean);
+      continue;
+    }
+    if ((m = ln.match(/^座位：(.*)$/))) {
+      out.seats = m[1].split("、").map(histParseSeat).filter(Boolean);
+      continue;
+    }
+    if ((m = ln.match(/^═+ 第 (\d+) 回合 ═+$/))) { cur = { turn: Number(m[1]), fac: [], prov: [], act: [], diplo: [] }; out.turns.push(cur); continue; }
+    if (!cur) continue;
+    if (/^【开局】/.test(ln)) { cur.sec = "fac"; continue; }
+    if (/^【地块】/.test(ln)) { cur.sec = "prov"; continue; }
+    if (/^【外交】/.test(ln)) { cur.sec = "diplo"; continue; }
+    if (/^【座位】/.test(ln)) { cur.sec = "seat"; continue; }
+    if (/^【(建造|行动)】/.test(ln)) { cur.sec = "act"; continue; }
+    if (cur.sec === "fac") {
+      m = ln.match(/^　[　 ]*(\S+)　国库 (-?[\d.]+)　占地 (\d+)　城市 (\d+) 级　兵力 (\d+)　发展度 (\d+)　首都 (\S+?)(　外交 (.+?))?(　（已灭亡）)?$/);
+      if (m) {
+        const dip = [];
+        if (m[9]) {
+          m[9].split("、").forEach(function(s) {
+            const q = s.match(/^(\S+) (愤怒|不安|中立|良好|友善)(（交战）)?$/);
+            if (q) dip.push({ b: q[1], tier: q[2], war: !!q[3] });
+          });
+        }
+        cur.fac.push({ name: m[1], treasury: +m[2], provs: +m[3], city: +m[4], units: +m[5], dev: +m[6], cap: m[7], dip: dip, dead: !!m[10] });
+      }
+      continue;
+    }
+    if (cur.sec === "prov") {
+      m = ln.match(/^　(\S+)　(\S+)　城市 (—|\d+ 级)　发展度 (—|\d+)　建筑 (\S+)　驻军 (.+)$/);
+      if (m) cur.prov.push({ name: m[1], owner: m[2] === "无主" ? null : m[2], city: m[3] === "—" ? 0 : parseInt(m[3]), dev: m[4] === "—" ? "" : +m[4], bld: m[5] === "—" ? "" : m[5], troop: m[6] });
+      continue;
+    }
+    if (cur.sec === "diplo") {
+      m = ln.match(/^　(\S+?)—(\S+?)　关系 (?:(?:😡|😟|😐|😊|😍)?(愤怒|不安|中立|良好|友善)|(\d+))(　交战)?$/);
+      if (m) { cur.diplo.push({ a: m[1], b: m[2], tier: m[3] || null, v: m[4] ? +m[4] : null, war: !!m[5] }); continue; }
+      m = ln.match(/^　(\S+?)—(\S+?)　(愤怒|不安|中立|良好|友善)(（交战）)?$/);
+      if (m) cur.diplo.push({ a: m[1], b: m[2], tier: m[3], v: null, war: !!m[4] });
+      continue;
+    }
+    if (cur.sec === "act") cur.act.push(ln.replace(/^　/, ""));
+  }
+  return out;
+}
+
+function histFactionByName(nm) {
+  if (typeof C === "undefined") return nm;
+  for (const f in C) {
+    if (f === nm) return f;
+    const d = C[f] || {};
+    if (d.evolved && d.evolved.name === nm) return f;
+    if (d.evolved2 && d.evolved2.name === nm) return f;
+  }
+  return nm;
+}
+
+function histMakeUnits(owner, troop) {
+  const arr = [];
+  if (!troop || troop === "—") return arr;
+  if (typeof ensureUnitDefs === "function") ensureUnitDefs();
+  for (const part of String(troop).split("、")) {
+    const m = part.match(/^(.+?)×([\d]+)$/);
+    if (!m) continue;
+    const nm = m[1], n = +m[2];
+    const def = (typeof UNIT_DEFS !== "undefined" && UNIT_DEFS) ? UNIT_DEFS[nm] : null;
+    // 特殊兵（步人甲/玄甲军/铁鹞子…）不在 UNIT_DEFS 里，按 spec 兵种重建
+    const isSpec = !def && typeof SPEC_TYPE !== "undefined" && SPEC_TYPE && SPEC_TYPE[nm];
+    const kind = def ? def.kind : (isSpec ? "spec" : "inf");
+    for (let i = 0; i < n; i++) {
+      const u = makeUnit(kind, nm, 0, 0, owner);
+      arr.push(u);
+    }
+  }
+  return arr;
+}
+
+// 按文本里某一回合的开局，拼出一份可读档的存档（单位属性由兵种推导）
+function buildSaveFromChronicle(raw, turnNo) {
+  const p = histParseChronicle(raw);
+  if (!p.turns.length) throw new Error("没有找到回合段落");
+  let blk = p.turns[p.turns.length - 1];
+  if (turnNo) {
+    const hit = p.turns.filter(function(t) { return t.turn === turnNo; })[0];
+    if (hit) blk = hit;
+  }
+  const seats = (p.seats && p.seats.length) ? p.seats : blk.fac.map(function(f) { return { faction: f.name, human: false }; });
+  const pickOrder = [], picks = {}, seatTypes = [];
+  seats.forEach(function(s, i) {
+    const f = histFactionByName(s.faction);
+    pickOrder.push({ name: s.name || ("玩家" + (i + 1)), type: s.human ? "human" : "computer" });
+    picks[i] = f;
+    seatTypes.push(s.human ? "human" : "computer");
+  });
+  let scenarioId2 = "sandbox";
+  if (typeof SCENARIOS !== "undefined") {
+    for (const k in SCENARIOS) if (SCENARIOS[k].name === p.scenario) { scenarioId2 = k; break; }
+  }
+  const provState2 = {};
+  const byName = {};
+  for (const pv of DATA) byName[pv.name] = pv;
+  // 海洋/荒漠等非陆地块不进史料，还原时按开局默认值补回，保证存档形状一致
+  for (const pv of DATA) {
+    if (pv.is_land) continue;
+    provState2[pv.id] = { owner: null, city: 0, dev: p.board === true ? 2 : 0, building: "", units: [] };
+  }
+  for (const row of blk.prov) {
+    const pv = byName[row.name];
+    if (!pv) continue;
+    const ownerF = row.owner ? histFactionByName(row.owner) : null;
+    provState2[pv.id] = { owner: ownerF, city: row.city, dev: row.dev, building: row.bld, units: histMakeUnits(ownerF, row.troop) };
+  }
+  const playerState2 = {};
+  const mutableCapital2 = {};
+  const eliminated2 = {};
+  for (const f of blk.fac) {
+    const key = histFactionByName(f.name);
+    playerState2[key] = { name: f.name, faction: key, treasury: f.treasury };
+    if (f.cap && f.cap !== "—") mutableCapital2[key] = f.cap;
+    if (f.dead) eliminated2[key] = true;
+  }
+  const relation2 = {}, prevWars2 = {};
+  const dipPairs = [];
+  if (blk.diplo && blk.diplo.length) {
+    for (const d of blk.diplo) dipPairs.push(d);
+  } else {
+    for (const f of blk.fac) for (const d of (f.dip || [])) dipPairs.push({ a: f.name, b: d.b, tier: d.tier, war: d.war });
+  }
+  for (const d of dipPairs) {
+    const a = histFactionByName(d.a), b = histFactionByName(d.b);
+    if (!a || !b) continue;
+    const key = a < b ? a + "_" + b : b + "_" + a;
+    const rv = histRelRep(d.tier);
+    if (rv !== 50) relation2[key] = rv;
+    if (d.war) prevWars2[key] = true;
+  }
+  let uid = 1;
+  for (const k in provState2) for (const u of provState2[k].units) u.uid = uid++;
+  return {
+    version: 2, pickOrder: pickOrder, picks: picks, scenarioId: scenarioId2,
+    seatTypes: seatTypes, currentTurn: blk.turn, gamePhase: "build", currentPlayerIdx: 0,
+    provState: provState2, playerState: playerState2, mutableCapital: mutableCapital2,
+    evolved: {}, eliminated: eliminated2, mingMovedTo: {}, mingColorCap: null, mingCapMovedTurn: -1,
+    relation: relation2, liaoNorth: null, liaoPhase: -1, prevWars: prevWars2, curWars: {},
+    zhaoN: 1, zhaoUsed: false, chronicle: [], incomeHistory: {}, powerHistory: {}, debuffState: {},
+    neutralCap: 2, neutralStartTurn: 2, winCond: "city", centralPlains: false,
+    startMoney: 10, startCapLv: 1, incomeMult: p.mult || 1, boardMode: p.board,
+    turnTimeLimit: 0, enclaveOn: true, terrainOn: true, mapView: "political",
+    unitUid: uid, gameOverShown: false, goalWon: {}, forceReloc: null,
+    humanElimShown: false, diploUsed: {}, diplomacyMessages: []
+  };
+}
+
+// 文本还原：还原到指定回合的开局（默认最后一回合）
+function restoreFromChronicleText(raw, turnNo) {
+  const save = buildSaveFromChronicle(raw, turnNo);
+  histGuard = true;
+  try { applyLoadedSave(save); } catch (e) { histGuard = false; throw e; }
+  histGuard = false;
+  historyStart();
+  return save;
+}
+
+
+// 每回合【外交】段：只列“非中立关系”和“处于战争”的组合（按座位顺序）
+function histDiploSection(snap) {
+  const g = (snap && snap.g) || {};
+  const rel = g.relation || {};
+  const wars = Object.assign({}, g.prevWars || {}, g.curWars || {});
+  const picks = g.picks || {};
+  const facs = [];
+  for (const k in picks) { const f = picks[k]; if (f && facs.indexOf(f) < 0) facs.push(f); }
+  const dn = function(f) { return (typeof displayName === "function") ? displayName(f) : f; };
+  const rows = [];
+  for (let i = 0; i < facs.length; i++) {
+    for (let j = i + 1; j < facs.length; j++) {
+      const a = facs[i], b = facs[j];
+      const key = a < b ? a + "_" + b : b + "_" + a;
+      const v = rel[key];
+      const war = !!wars[key];
+      const t = histRelTier(v === undefined ? 50 : v);
+      if (t.name === "中立" && !war) continue;
+      rows.push("　" + dn(a) + "—" + dn(b) + "　" + t.name + (war ? "（交战）" : ""));
+    }
+  }
+  return rows;
+}
+
+// 某势力的外交（旧：挂在势力行尾）
+function histFactionDiplo(snap, self) {
+  const g = (snap && snap.g) || {};
+  const rel = g.relation || {};
+  const wars = Object.assign({}, g.prevWars || {}, g.curWars || {});
+  const picks = g.picks || {};
+  const facs = [];
+  for (const k in picks) { const f = picks[k]; if (f && facs.indexOf(f) < 0) facs.push(f); }
+  const dn = function(f) { return (typeof displayName === "function") ? displayName(f) : f; };
+  const rows = [];
+  for (const o of facs) {
+    if (o === self) continue;
+    const a = self, b = o;
+    const key = a < b ? a + "_" + b : b + "_" + a;
+    const v = rel[key];
+    const war = !!wars[key];
+    const t = histRelTier(v === undefined ? 50 : v);
+    if (t.name === "中立" && !war) continue;
+    rows.push(dn(b) + " " + t.name + (war ? "（交战）" : ""));
+  }
+  return rows.join("、");
+}
+
+
+// 关系五档（与游戏内 relEmoji 完全一致：愤怒 ≤14 / 不安 15–29 / 中立 30–69 / 良好 70–84 / 友善 ≥85）
+function histRelTier(v) {
+  v = Number(v);
+  if (!isFinite(v)) v = 50;
+  if (v >= 85) return { name: "友善", emoji: "😍", rep: 92 };
+  if (v >= 70) return { name: "良好", emoji: "😊", rep: 77 };
+  if (v >= 30) return { name: "中立", emoji: "😐", rep: 50 };
+  if (v >= 15) return { name: "不安", emoji: "😟", rep: 22 };
+  return { name: "愤怒", emoji: "😡", rep: 7 };
+}
+function histRelRep(name) {
+  if (name === "友善") return 92;
+  if (name === "良好") return 77;
+  if (name === "中立") return 50;
+  if (name === "不安") return 22;
+  if (name === "愤怒") return 7;
+  return 50;
 }
 </script>
 
