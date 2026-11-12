@@ -489,15 +489,6 @@ html, body { height:100%; overscroll-behavior:none; }
 /* ===== 加入新玩家（23-addplayer.js） ===== */
 #addplayer-modal { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:920; background:rgba(20,14,8,.97); border:2px solid rgba(255,215,0,.45); border-radius:12px; padding:14px 18px; width:min(760px,94vw); max-height:86vh; display:flex; flex-direction:column; box-sizing:border-box; }
 #addplayer-modal h3 { color:#ffd700; margin:0 0 8px; letter-spacing:3px; text-align:center; }
-#addplayer-modal .ap-tip { font-size:13px; color:#b8a888; line-height:1.6; margin-bottom:8px; }
-#addplayer-list { overflow:auto; flex:1; min-height:80px; padding-right:4px; }
-#addplayer-modal .ap-region { color:#e9d9a6; font-size:13px; letter-spacing:2px; margin:8px 0 4px; opacity:.8; }
-#addplayer-modal .ap-row { display:flex; align-items:center; gap:10px; padding:3px 2px; border-bottom:1px dotted rgba(233,217,166,.12); }
-#addplayer-modal .ap-prov { color:#ffe9b0; font-size:15px; min-width:88px; }
-#addplayer-modal .ap-civ { color:#cfc3a0; font-size:13px; flex:1; }
-#addplayer-modal .ap-btns { display:flex; gap:6px; }
-#addplayer-modal .ap-btns .sbtn { width:auto; padding:5px 12px; font-size:13px; }
-#addplayer-modal .ap-empty { color:#b8a888; padding:10px 2px; }
 
 /* 点地块加人模式 */
 body.ap-picking canvas { cursor: crosshair; }
@@ -655,16 +646,12 @@ body.ap-picking canvas { cursor: crosshair; }
   </div>
   <div id="addplayer-modal" class="hidden">
     <h3>➕ 加入新玩家</h3>
-    <div class="ap-tip">已进入「点地块加人」模式：点击一个空地或非首都地块。开局资金 = 10 +（回合数-1）×4，上限 100。</div>
     <div id="ap-confirm-text" class="ap-confirm"></div>
     <div class="cm-btns">
       <button class="sbtn" style="width:auto;padding:8px 18px" onclick="confirmAddPlayer('human')">人类</button>
       <button class="sbtn" style="width:auto;padding:8px 18px" onclick="confirmAddPlayer('computer')">电脑</button>
       <button class="sbtn" style="width:auto;padding:8px 16px" onclick="closeAddPlayer()">取消</button>
     </div>
-  </div>
-    <div id="addplayer-list"></div>
-    <div class="cm-btns"><button class="sbtn" style="width:auto;padding:8px 16px" onclick="closeAddPlayer()">关闭</button></div>
   </div>
   <div id="ai-modal" class="hidden" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:600;background:rgba(20,14,8,.98);border:2px solid rgba(255,215,0,.5);border-radius:12px;padding:16px 20px;width:min(780px,94vw);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">
     <h3 style="color:#ffd700;margin:0 0 8px;letter-spacing:3px;text-align:center;font-size:18px;">📋 决策</h3>
@@ -5777,11 +5764,8 @@ function showGameOver(w, mode, final) {
   if (goCloseBtn) goCloseBtn.style.display = _goFinal ? "none" : ""; // 彻底结束时 go-continue 已变"关闭"，隐藏固定关闭避免重复
   // 国家颜色 = 势力固定色（默认首都色；只有明迁都换色，剧本覆盖的首都不算）
   const factionColor = f => {
-    let cap = CAPITAL_MAP[f];
-  cap = factionDisplayCapital(f) || cap; // 明迁都换色的统一入口
-    const p = provByName(cap);
-    if (p && p.rgb) return "rgb(" + p.rgb[0] + "," + p.rgb[1] + "," + p.rgb[2] + ")";
-    return "#ffd700";
+    const c = factionBaseColor(f);
+    return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
   };
   const cols = {};
   const fs = [];
@@ -8390,13 +8374,15 @@ document.addEventListener("keydown", function(e) {
   if (e.key === "Escape" && !document.getElementById("battle-modal").classList.contains("hidden")) closeBattleModal();
 });
 
+// ---- 势力色：一律取开局首都（CAPITAL_MAP）的地块色，迁都不换色 ----
+function factionBaseColor(faction) {
+  const cap = CAPITAL_MAP[faction];
+  for (const p of DATA) if (p.name === cap) return p.rgb;
+  return [150, 150, 150];
+}
 // ---- 势力涂色：首都/占领地块显示势力色 ----
 function factionColor(faction) {
-  // 明朝统一用燕云色（不随迁都换色）
-  if (faction === "明") { const yp = DATA.find(function(p) { return p.name === "燕云"; }); if (yp) return yp.rgb; }
-  let cap = CAPITAL_MAP[faction];
-  for (const p of DATA) if (p.name === cap) return p.rgb;
-  return [150,150,150];
+  return factionBaseColor(faction);
 }
 // 内部边界（同势力地块之间）检测：淡色显示；不同势力之间/中立之间保持浓色
 // 列表里的文明名颜色：默认用纯势力色；特别深的颜色提亮，保证深底上看得清
@@ -8988,12 +8974,8 @@ function edRenderAll() {
   edRenderUnits();
 }
 function factionColorOf(f) {
-  // 与游戏一致：只有明主动迁都换色，其他势力用默认首都色
-  let cap = CAPITAL_MAP[f];
-  cap = factionDisplayCapital(f) || cap; // 明迁都换色的统一入口
-  const p = provByName(cap);
-  if (p && p.rgb) return "rgb(" + p.rgb[0] + "," + p.rgb[1] + "," + p.rgb[2] + ")";
-  return "#ffd700";
+  const c = factionBaseColor(f);
+  return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
 }
 function edMainClick(e) {
   const tgt = getProvAt(e.clientX, e.clientY);
@@ -10988,7 +10970,7 @@ function addPlayerCandidates() {
     const p = DATA.find(function(x) { return x.name === cap; });
     if (!p || !p.is_land) continue;
     const s = provState[p.id];
-    if (s && s.owner && playerState[s.owner]) continue; // 已被局中势力占着，不抢
+    if (s && s.owner) continue; // 只能加入中立地块
     seen[cap] = true;
     out.push({ prov: cap, name: f, base: true, region: "原有文明" });
   }
@@ -10996,9 +10978,10 @@ function addPlayerCandidates() {
     if (playerState[c.name] || caps[c.prov] || seen[c.prov]) continue;
     const p = DATA.find(function(x) { return x.name === c.prov; });
     if (!p || !p.is_land) continue;
-    seen[c.prov] = true;
     const s = provState[p.id];
-    out.push({ prov: c.prov, name: c.name, base: false, region: c.region, owner: (s && s.owner) || null });
+    if (s && s.owner) continue; // 只能加入中立地块
+    seen[c.prov] = true;
+    out.push({ prov: c.prov, name: c.name, base: false, region: c.region });
   }
   return out;
 }
@@ -11008,13 +10991,18 @@ function addPlayerCandidateAt(provName) {
   return null;
 }
 
-// 加入新玩家：type = "human" | "computer"；开局资金 = min(100, 10 + (回合数-1)×4)
+// 开局资金 = min(100, 10 + (回合数-1)×4)
+function addPlayerMoney() { return Math.min(100, 10 + (currentTurn - 1) * 2); }
+function addPlayerMoneyText(n) { return n % 1 === 0 ? String(n) : n.toFixed(2); }
+
+// 加入新玩家：type = "human" | "computer"
 function addNewPlayer(provName, type) {
-  if (gameOverShown) { showToast("对局已结束，不能再加入玩家"); return false; }
+  if (gameOverShown) return false;
+  if (scenarioId !== "sandbox") return false; // 剧本模式不允许中途加人
   const cand = addPlayerCandidateAt(provName);
-  if (!cand) { showToast("这个地块不能加入新玩家"); return false; }
+  if (!cand) return false;
   const p = DATA.find(function(x) { return x.name === provName; });
-  if (!p || !p.is_land) { showToast("只能选陆地地块"); return false; }
+  if (!p || !p.is_land) return false;
   const f = cand.name;
 
   if (!C[f]) registerCustomCiv(f, provName);
@@ -11022,7 +11010,7 @@ function addNewPlayer(provName, type) {
   mutableCapital[f] = provName;
   eliminated[f] = false;
 
-  const money = Math.min(100, 10 + (currentTurn - 1) * 4);
+  const money = addPlayerMoney();
   const seatName = "玩家" + (pickOrder.length + 1);
   playerState[f] = { name: seatName, faction: f, treasury: money };
   const idx = pickOrder.length;
@@ -11049,21 +11037,23 @@ function addNewPlayer(provName, type) {
   if (typeof applyOwnerColors === "function") applyOwnerColors();
   if (typeof updateProvLabels === "function") updateProvLabels();
   if (typeof showProvinceInfo === "function") showProvinceInfo(p);
-  showToast("「" + f + "」加入对局：" + provName + "，国库 " + money.toFixed(2) + " 钱");
+  // 与占领提示同款胶囊：底部堆叠、自动淡出
+  if (typeof showCapsule === "function") showCapsule(f + " 加入对局", false);
   if (typeof checkEliminations === "function") { try { checkEliminations(); } catch (e) {} }
   return true;
 }
 
 // ---- 点击模式 ----
 function openAddPlayer() {
-  if (gameOverShown) { showToast("对局已结束"); return; }
+  if (gameOverShown) return;
+  if (scenarioId !== "sandbox") return; // 剧本模式不允许中途加人
   if (!addPlayerCandidates().length) { showToast("没有可以加入的地块了"); return; }
   addPlayerMode = true;
   addPlayerPick = null;
   const m = document.getElementById("addplayer-modal");
   if (m) m.classList.add("hidden");
   document.body.classList.add("ap-picking");
-  showToast("点击一个地块，把新玩家放在那里（Esc 取消）");
+  showToast("点击地块以加入新玩家");
 }
 function closeAddPlayer() {
   addPlayerMode = false;
@@ -11076,10 +11066,10 @@ function closeAddPlayer() {
 function pickAddPlayerTile(provName) {
   if (!addPlayerMode) return false;
   const cand = addPlayerCandidateAt(provName);
-  if (!cand) { showToast("这里不能加入（已是被占首都或没有对应文明）"); return false; }
+  if (!cand) { showToast("这个地块不能加入新玩家"); return false; }
   addPlayerPick = cand;
   const t = document.getElementById("ap-confirm-text");
-  if (t) t.innerHTML = "在 <b>" + escHtml(cand.prov) + "</b> 加入「<b>" + escHtml(cand.name) + "</b>」";
+  if (t) t.innerHTML = "在 <b>" + escHtml(cand.prov) + "</b> 加入 <b>" + escHtml(cand.name) + "</b>，初始国库为 <b>" + addPlayerMoneyText(addPlayerMoney()) + "</b> 钱";
   const m = document.getElementById("addplayer-modal");
   if (m) m.classList.remove("hidden");
   return true;
