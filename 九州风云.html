@@ -709,6 +709,30 @@ const ADV_MODE = (typeof window !== "undefined" && window.__ADV_MODE__) || "C-po
 // 军队维护费（测试用）：off | price5（兵种基础价/5） | flat2（每兵 2 钱）
 const UPKEEP_MODE = (typeof window !== "undefined" && window.__UPKEEP_MODE__) || "price5";
 
+// ===== 随机源 =====
+// 默认就是 Math.random，行为与以前完全一致。
+// 设置 window.__SEED__ 后改用 mulberry32，同一 seed 得到同一串随机数，
+// 用于重构对拍（work/parity）和无头跑局的复现。
+let __rngState = 0;
+let __rngSeeded = false;
+(function initRng() {
+  if (typeof window === "undefined" || window.__SEED__ === undefined || window.__SEED__ === null) return;
+  __rngState = (Number(window.__SEED__) | 0) || 1;
+  __rngSeeded = true;
+})();
+
+function rand() {
+  if (!__rngSeeded) return Math.random();
+  // mulberry32
+  __rngState = (__rngState + 0x6D2B79F5) | 0;
+  let t = __rngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+// 掷骰：1–6
+function rollD6() { return 1 + Math.floor(rand() * 6); }
 
 // 渲染层总开关：写渲染相关函数时统一在开头 `if (HZ_HEADLESS) return;`
 function renderOn() { return !HZ_HEADLESS; }
@@ -1048,6 +1072,426 @@ function updateProvLabels() {
   if (typeof refreshUnitTint === "function") refreshUnitTint();
 }
 // 开局：首都默认 1 级城市 + 1 队步兵（规则书：开局仅拥有首都，自动获得1队步兵）
+// ===== Buff 分发层 =====
+// 一行文案 = 一个 buff，数据在 src/data/buffs.json（构建时内联成 BUFFS 常量）。
+//
+// 设计原则：
+// 1) 各模块只调用 buffsOf() / buffApply() 之类的查询函数，不再写 `f === "秦"` 这种判断。
+// 2) 每个 hook 一个实现函数，签名统一为 (ctx) => 结果；ctx 里带 faction / prov / 各种实参。
+// 3) 找不到 hook 时返回 undefined，调用方用旧逻辑兜底（迁移期间双跑，保证行为一致）。
+
+const BUFFS = [{"id":"qin_garrison_income","faction":"秦","stage":"base","desc":"有己方军队驻扎的地块，收入额外 +2 钱","hook":"income.provBonus","params":{"amount":2,"require":"ownUnit"}},{"id":"qin_mountain_dev","faction":"秦","stage":"base","desc":"山地地形的发展度价格 −4","hook":"dev.price","params":{"terrain":"山地","delta":-4}},{"id":"han_kaituo","faction":"汉","stage":"base","desc":"全体军队获得「开拓」：对中立单位战力+1","hook":"unit.keywords","params":{"kw":"开拓","kind":"all","seq":40}},{"id":"han_desert_dev","faction":"汉","stage":"base","desc":"沙漠地形的发展度价格 −4","hook":"dev.price","params":{"terrain":"沙漠","delta":-4}},{"id":"jin_all_dev","faction":"晋","stage":"base","desc":"所有地形的发展度价格 −2","hook":"dev.price","params":{"terrain":"*","delta":-2}},{"id":"tang_cav_discount","faction":"唐","stage":"base","desc":"招募骑兵价格 −3 钱","hook":"unit.recruitCost","params":{"unitKind":"cav","delta":-3}},{"id":"ming_capital_battle","faction":"明","stage":"base","desc":"首都为江南/燕云/广东时：\n位于首都的军队战力 +1，首都的建造/升级城市价格 −5","hook":"battle.capitalMod","params":{"targets":["江南","燕云","广东"],"battle":1,"buildDelta":-5}},{"id":"ming_relocate","faction":"明","stage":"base","desc":"各限一次，可主动迁都至以上三个地块","hook":"action.relocate","params":{"targets":["江南","燕云","广东"],"cost":0,"oncePerTarget":true,"transferCap":1,"colorSkip":["江南"]}},{"id":"shun_zhao","faction":"顺","stage":"base","desc":"行动阶段可支付 20 钱，有 16.6% 的概率招降一个相邻地块及其守军，可重复尝试","hook":"action.zhao","params":{"cost":20,"chance":16.6}},{"id":"shun_zhao_guard","faction":"顺","stage":"base","desc":"不能是对方唯一有城市的地块","hook":"action.zhaoGuard","params":{"rule":"notLastCity"}},{"id":"nomad_no_upgrade","faction":"契丹","stage":"base","desc":"禁止升级城市","hook":"build.cityForbidden","params":{"what":"upgrade"}},{"id":"nomad_city_cost","faction":"契丹","stage":"base","desc":"建造城市价格 +10","hook":"build.cityCost","params":{"delta":10}},{"id":"nomad_cav_lv1","faction":"契丹","stage":"base","desc":"骑兵允许在 1 级城市招募","hook":"build.cavInCity","params":{"minCity":1}},{"id":"nomad_cav_yuanshe","faction":"契丹","stage":"base","desc":"骑兵获得「远射」：自由选择目标","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","seq":10}},{"id":"nomad_cav_lueduo","faction":"契丹","stage":"base","desc":"骑兵获得「劫掠」：进攻时战力 +1","hook":"unit.keywords","params":{"kw":"劫掠","kind":"cav","seq":20}},{"id":"nomad_relocate","faction":"契丹","stage":"base","desc":"全局游戏限一次，可花费 5 钱迁都，旧首都的 1 级城市等级转移至新首都","hook":"action.relocate","params":{"cost":5,"once":true,"anywhere":true,"transferCap":1}},{"id":"nomad_no_upgrade_nv","faction":"女真","stage":"base","desc":"禁止升级城市","hook":"build.cityForbidden","params":{"what":"upgrade"}},{"id":"nomad_city_cost_nv","faction":"女真","stage":"base","desc":"建造城市价格 +10","hook":"build.cityCost","params":{"delta":10}},{"id":"nomad_cav_lv1_nv","faction":"女真","stage":"base","desc":"骑兵允许在 1 级城市招募","hook":"build.cavInCity","params":{"minCity":1}},{"id":"nomad_cav_yuanshe_nv","faction":"女真","stage":"base","desc":"骑兵获得「远射」：自由选择目标","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","seq":10}},{"id":"nomad_cav_lueduo_nv","faction":"女真","stage":"base","desc":"骑兵获得「劫掠」：进攻时战力 +1","hook":"unit.keywords","params":{"kw":"劫掠","kind":"cav","seq":20}},{"id":"nomad_relocate_nv","faction":"女真","stage":"base","desc":"全局游戏限一次，可花费 5 钱迁都，旧首都的 1 级城市等级转移至新首都","hook":"action.relocate","params":{"cost":5,"once":true,"anywhere":true,"transferCap":1}},{"id":"nomad_no_upgrade_mg","faction":"蒙古","stage":"base","desc":"禁止升级城市","hook":"build.cityForbidden","params":{"what":"upgrade"}},{"id":"nomad_city_cost_mg","faction":"蒙古","stage":"base","desc":"建造城市价格 +10","hook":"build.cityCost","params":{"delta":10}},{"id":"nomad_cav_lv1_mg","faction":"蒙古","stage":"base","desc":"骑兵允许在 1 级城市招募","hook":"build.cavInCity","params":{"minCity":1}},{"id":"nomad_cav_yuanshe_mg","faction":"蒙古","stage":"base","desc":"骑兵获得「远射」：自由选择目标","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","seq":10}},{"id":"nomad_cav_lueduo_mg","faction":"蒙古","stage":"base","desc":"骑兵获得「劫掠」：进攻时战力 +1","hook":"unit.keywords","params":{"kw":"劫掠","kind":"cav","seq":20}},{"id":"nomad_relocate_mg","faction":"蒙古","stage":"base","desc":"全局游戏限一次，可花费 5 钱迁都，旧首都的 1 级城市等级转移至新首都","hook":"action.relocate","params":{"cost":5,"once":true,"anywhere":true,"transferCap":1}},{"id":"dangxiang_cav_lv1","faction":"党项","stage":"base","desc":"骑兵允许在 1 级城市招募","hook":"build.cavInCity","params":{"minCity":1}},{"id":"dangxiang_cav_yuanshe","faction":"党项","stage":"base","desc":"骑兵获得「远射」：自由选择目标","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","seq":10}},{"id":"dangxiang_transfer_out","faction":"党项","stage":"base","desc":"转移 20% 收入给邻邦中军力最高的和平邻国","hook":"income.transferOut","params":{"rate":0.2}},{"id":"liao_choose","faction":"契丹","stage":"evolved","desc":"每回合准备阶段二选一","hook":"ai.liaoChoose","params":{"southIf":{"upgradable":true,"treasuryBelow":60},"otherwise":"north"}},{"id":"liao_south_upgrade","faction":"契丹","stage":"evolved","desc":"南面官：升级城市价格 −5","hook":"build.upgradeCost","params":{"delta":-5,"when":"liaoSouth"}},{"id":"liao_north_cav","faction":"契丹","stage":"evolved","desc":"北面官：首都与行宫招募骑兵价格 −3，骑兵获得「远射」：自由选择目标","hook":"unit.recruitCost","params":{"unit":"骑兵","delta":-3,"when":"liaoNorth","prov":"capitalOrPalace"}},{"id":"jin_tribute","faction":"女真","stage":"evolved","desc":"每个和平邻国转移 20% 收入给自己，每个和平中立地块转移 20% 收入给自己","hook":"income.tributeIn","params":{"rate":0.2}},{"id":"yuan_yizhan","faction":"蒙古","stage":"evolved","desc":"全体军队获得「驿站」：允许额外调动一次","hook":"unit.keywords","params":{"kw":"驿站","kind":"all","seq":30}},{"id":"yuan_cav_yuanshe","faction":"蒙古","stage":"evolved","desc":"骑兵获得「远射」：自由选择目标","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","seq":10}},{"id":"liao_evolve","faction":"契丹","stage":"evolved","note":"成辽：清北面官状态；全体单位摘「远射」「劫掠」（北面官选择时再加）","hook":"evolve.onEvolve","params":{"resetLiaoNorth":true,"removeKeywords":[{"kw":"远射","kind":"all"},{"kw":"劫掠","kind":"all"}]}},{"id":"jin_evolve","faction":"女真","stage":"evolved","note":"成金：骑兵摘「远射」「劫掠」（蒙古→元仍保留远射，元特性另给）","hook":"evolve.onEvolve","params":{"removeKeywords":[{"kw":"远射","kind":"cav"},{"kw":"劫掠","kind":"cav"}]}},{"id":"yuan_evolve","faction":"蒙古","stage":"evolved","note":"成元：全体单位摘「劫掠」、补「驿站」；骑兵补「远射」","hook":"evolve.onEvolve","params":{"removeKeywords":[{"kw":"劫掠","kind":"all"}],"addKeywords":[{"kw":"驿站","kind":"all"},{"kw":"远射","kind":"cav"}]}},{"id":"dangxiang_evolve","faction":"党项","stage":"evolved","note":"成夏：骑兵摘「远射」「劫掠」（定难节度本来没有劫掠）；首都额外 +1 发展度","hook":"evolve.onEvolve","params":{"removeKeywords":[{"kw":"远射","kind":"cav"},{"kw":"劫掠","kind":"cav"}],"capitalDev":1}},{"id":"liao_evolve_req","faction":"契丹","stage":"base","note":"进化条件：需求地区表来自 factions.json 的 evolveReq，阈值在此声明","hook":"evolve.req","params":{"needAreas":2,"needCityLevels":3}},{"id":"jin_evolve_req","faction":"女真","stage":"base","note":"进化条件：需求地区表来自 factions.json 的 evolveReq，阈值在此声明","hook":"evolve.req","params":{"needAreas":2,"needCityLevels":3}},{"id":"yuan_evolve_req","faction":"蒙古","stage":"base","note":"进化条件：需求地区表来自 factions.json 的 evolveReq，阈值在此声明","hook":"evolve.req","params":{"needAreas":2,"needCityLevels":3}},{"id":"dangxiang_evolve_req","faction":"党项","stage":"base","note":"进化条件：需求地区表来自 factions.json 的 evolveReq，阈值在此声明","hook":"evolve.req","params":{"needAreas":2,"needCityLevels":3}},{"id":"liao_north_cav_yuanshe","faction":"契丹","stage":"evolved","note":"北面官：骑兵获得「远射」（与 liao_north_cav 同属「北面官」那一行；建国后基础特性失效，这条负责补回来）","hook":"unit.keywords","params":{"kw":"远射","kind":"cav","when":"liaoNorth","seq":10}},{"id":"dangxiang_no_lueduo","faction":"党项","stage":"base","note":"定难节度没有「劫掠」：每回合把（含叛逃带进来的）「劫掠」清掉；建国（夏）后不再清","hook":"unit.keywords","params":{"kw":"劫掠","kind":"all","op":"remove"}}];
+
+const BUFF_HOOKS = {};
+
+// 注册一个 hook 实现
+function buffHook(name, fn) { BUFF_HOOKS[name] = fn; }
+
+// 取某势力在某个阶段的全部 buff
+function buffsOf(faction, stage) {
+  const out = [];
+  if (typeof BUFFS === "undefined" || !BUFFS) return out;
+  for (let i = 0; i < BUFFS.length; i++) {
+    const b = BUFFS[i];
+    if (b.faction !== faction) continue;
+    if ((b.stage || "base") !== (stage || "base")) continue;
+    out.push(b);
+  }
+  return out;
+}
+
+// 取某势力当前阶段（含进化后）的全部 buff
+function buffsNow(faction) {
+  const stage = (typeof evolved !== "undefined" && evolved && evolved[faction]) ? "evolved" : "base";
+  const base = buffsOf(faction, "base");
+  const evo = stage === "evolved" ? buffsOf(faction, "evolved") : [];
+  return base.concat(evo);
+}
+
+// 收集：对该势力所有 buff 依次调用 hook，返回每个的返回值（跳过 undefined / 0）
+function buffCollect(faction, hookName, ctx) {
+  const fn = BUFF_HOOKS[hookName];
+  if (!fn) return [];
+  const list = buffsNow(faction);
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const b = list[i];
+    if (b.hook !== hookName) continue;
+    const c = Object.assign({ faction: faction, buff: b, params: b.params || {} }, ctx || {});
+    let r;
+    try { r = fn(c); } catch (e) { r = undefined; }
+    if (r !== undefined && r !== null && r !== 0 && r !== false) out.push(r);
+  }
+  return out;
+}
+
+// 第一个非空结果（用于"取一个数"的场景）
+function buffFirst(faction, hookName, ctx, fallback) {
+  const r = buffCollect(faction, hookName, ctx);
+  return r.length ? r[0] : fallback;
+}
+
+// 数值累加（用于"多个 buff 都改同一个数"）
+function buffSum(faction, hookName, ctx, base) {
+  let v = base || 0;
+  const r = buffCollect(faction, hookName, ctx);
+  for (let i = 0; i < r.length; i++) if (typeof r[i] === "number") v += r[i]; else if (Array.isArray(r[i])) v = v;
+  return v;
+}
+
+// 若有任一 buff 命中该 hook 且返回真，则为真
+function buffAny(faction, hookName, ctx) {
+  const r = buffCollect(faction, hookName, ctx);
+  for (let i = 0; i < r.length; i++) if (r[i] === true) return true;
+  return false;
+}
+
+// 合并数组型结果
+function buffFlat(faction, hookName, ctx) {
+  const out = [];
+  const r = buffCollect(faction, hookName, ctx);
+  for (let i = 0; i < r.length; i++) {
+    if (Array.isArray(r[i])) for (let j = 0; j < r[i].length; j++) out.push(r[i][j]);
+    else out.push(r[i]);
+  }
+  return out;
+}
+
+// ===== 内置 hook 实现（每个迁移一个硬编码点就加一段） =====
+
+// 发展度价格修正
+buffHook("dev.price", function (c) {
+  const p = c.params;
+  if (p.terrain !== "*" && p.terrain !== c.prov.terrain) return 0;
+  return p.delta;
+});
+
+// 招募价格修正
+buffHook("unit.recruitCost", function (c) {
+  const p = c.params;
+  // unitKind 存在时按兵种类匹配（如「天可汗」对骑兵类全体生效，含玄甲军）；
+  // 否则按单位名精确匹配（如辽北面官只对「骑兵」生效）
+  if (p.unitKind) { if (c.unitKind !== p.unitKind) return 0; }
+  else if (p.unit !== c.unitName) return 0;
+  if (p.when === "liaoNorth" && !(typeof liaoNorth !== "undefined" && liaoNorth === true)) return 0;
+  if (p.prov === "capitalOrPalace") {
+    const cap = (typeof mutableCapital !== "undefined" && mutableCapital[c.faction]) || CAPITAL_MAP[c.faction];
+    if (!c.prov) return 0;
+    if (c.prov.name !== cap && c.building !== "行宫") return 0;
+  }
+  return p.delta;
+});
+
+// 词条授予 / 剥夺（ctx: isCav、unit）。每条返回一个 op，调用方按 op 处理：
+//   add（默认）→ 授予 params.kw；remove → 清掉 params.kw（定难节度没有「劫掠」）
+//   kind: all=全体、cav=仅骑兵；seq: 新建单位时的授予顺序（复刻旧的 if 链顺序）
+// 基础特性（stage=base）在建国后失效：辽/金/元/夏 由 evolved 组自己的条目接管。
+buffHook("unit.keywords", function (c) {
+  const p = c.params || {};
+  if ((c.buff && (c.buff.stage || "base") === "base") && !buffBaseOnly(c.faction)) return [];
+  if (p.when === "liaoNorth" && !(typeof liaoNorth !== "undefined" && liaoNorth === true)) return [];
+  if (p.kind === "cav" && c.isCav !== true) return [];
+  if (!p.kw) return [];
+  if (p.op === "remove") return [{ kw: p.kw, op: "remove" }];
+  return [{ kw: p.kw, op: "add", seq: typeof p.seq === "number" ? p.seq : 0 }];
+});
+
+// 驻军收入加成（秦：有己方军队驻扎的地块，收入额外 +2 钱）
+buffHook("income.provBonus", function (c) {
+  const p = c.params;
+  if (p.require === "ownUnit" && !(c.state && c.state.units && c.state.units.length > 0)) return 0;
+  return typeof p.amount === "number" ? p.amount : 0;
+});
+
+// 收入转出比例（党项：转移给邻邦中军力最高的和平邻国）
+buffHook("income.transferOut", function (c) {
+  return typeof c.params.rate === "number" ? c.params.rate : 0;
+});
+
+// 朝贡收入比例（女真进化后：收和平邻国与邻接中立地块的份额）
+buffHook("income.tributeIn", function (c) {
+  return typeof c.params.rate === "number" ? c.params.rate : 0;
+});
+
+// 有些特性只在"未建立王朝"时生效（游牧四家）。buffsNow() 恒返回 base 条目，
+// 所以要在 hook 里显式看进化状态，否则辽/金/元会残留游牧特性。
+function buffBaseOnly(faction) {
+  return !(typeof evolved !== "undefined" && evolved && evolved[faction]);
+}
+
+// 建城价格修正（游牧三家：建造城市 +10；党项没有这一条，天然不加价）
+buffHook("build.cityCost", function (c) {
+  if (!buffBaseOnly(c.faction)) return 0; // 进化后特性消失（辽/金/元）
+  // 与旧公式逐字等价：旧代码的 +10 是无条件加的，升级路径由调用方的
+  // 「禁止升级」「AI 不生成升级候选」「面板隐藏按钮」三处闸门挡住，不由价格公式管。
+  return typeof c.params.delta === "number" ? c.params.delta : 0;
+});
+
+// 升级价格修正（辽·南面官：升级城市 −5）
+buffHook("build.upgradeCost", function (c) {
+  const p = c.params;
+  if (!(c.city >= 1)) return 0; // 只作用于升级
+  if (p.when === "liaoSouth" && !(typeof liaoNorth !== "undefined" && liaoNorth === false)) return 0;
+  return typeof p.delta === "number" ? p.delta : 0;
+});
+
+// 禁止升级城市（游牧三家；党项没有这一条，可以升级）
+buffHook("build.cityForbidden", function (c) {
+  if (!buffBaseOnly(c.faction)) return false; // 进化后特性消失
+  if (c.params.what && c.what && c.params.what !== c.what) return false;
+  return true;
+});
+
+// 骑兵可招城市等级（游牧四家含党项：1 级城即可招骑兵）
+buffHook("build.cavInCity", function (c) {
+  const p = c.params;
+  if (!buffBaseOnly(c.faction)) return 0; // 进化后特性消失
+  const kind = p.kind || "cav";           // 没写 kind 的按骑兵算（desc：骑兵允许在 1 级城市招募）
+  if (kind !== c.kind) return 0;
+  return typeof p.minCity === "number" ? p.minCity : 0;
+});
+
+// 首都建造折扣（明·天子守国门：首都的建造/升级城市价格 −5）
+// 数据挂在 battle.capitalMod 的 params.buildDelta 上（战斗与建造共用一条文案），
+// 判定条件与旧代码一致：首都地块名 ∈ params.targets，且本块就是首都。
+function buffCapitalBuildDelta(faction, prov) {
+  if (!prov) return 0;
+  const cap = (typeof mutableCapital !== "undefined" && mutableCapital[faction]) || CAPITAL_MAP[faction];
+  if (!cap || prov.name !== cap) return 0;
+  const list = buffsNow(faction);
+  for (let i = 0; i < list.length; i++) {
+    const b = list[i];
+    if (b.hook !== "battle.capitalMod") continue;
+    const p = b.params || {};
+    if (Array.isArray(p.targets) && p.targets.indexOf(cap) < 0) continue;
+    if (typeof p.buildDelta === "number") return p.buildDelta;
+  }
+  return 0;
+}
+
+// 首都战力修正（明·天子守国门：位于首都的军队战力 +1）
+// 与 buffCapitalBuildDelta 共用同一条文案、同一套 targets 判定，这里只给战斗部分；
+// 建造部分（buildDelta）仍归 buffCapitalBuildDelta 管，两边互不影响。
+// 返回 { v } 而不是裸数字：buffCollect 会把 0 过滤掉，返回对象才能区分
+// 「有这条 buff 但不生效」和「没有这条 buff」（后者才走调用方的旧逻辑兜底）。
+buffHook("battle.capitalMod", function (c) {
+  const p = c.params || {};
+  const cap = (typeof mutableCapital !== "undefined" && mutableCapital[c.faction]) || CAPITAL_MAP[c.faction];
+  if (!cap || !c.prov) return { v: 0 };
+  if (Array.isArray(p.targets) && p.targets.indexOf(cap) < 0) return { v: 0 };
+  if (c.prov.name !== cap) return { v: 0 };
+  return { v: typeof p.battle === "number" ? p.battle : 0 };
+});
+
+// 进化条件：需求地块数 + 城市等级总和（地区表由调用方传入，阈值来自 buffs.json）
+buffHook("evolve.req", function (c) {
+  const p = c.params || {};
+  const needAreas = typeof p.needAreas === "number" ? p.needAreas : 2;
+  const needCityLevels = typeof p.needCityLevels === "number" ? p.needCityLevels : 3;
+  const areas = c.areas || [];
+  let owned = 0, cityLevels = 0;
+  for (const prov of DATA) {
+    const st = provState[prov.id];
+    if (!st || st.owner !== c.faction) continue;
+    if (areas.indexOf(prov.name) >= 0) owned++;
+    cityLevels += (st.city || 0); // 城市等级总和（规则表述为「三座城市」）
+  }
+  return { ok: owned >= needAreas && cityLevels >= needCityLevels };
+});
+
+// 进化时的势力差异：摘词条 / 补词条 / 清北面官状态 / 首都发展度
+// 返回 { capitalDev } 给调用方在首都升级之后应用（保持「先升城市、再升发展度」的既有文案顺序）
+buffHook("evolve.onEvolve", function (c) {
+  const p = c.params || {};
+  const f = c.faction;
+  // 北面官二选一状态清空：成辽后需重新选
+  if (p.resetLiaoNorth) { liaoNorth = null; liaoPhase = -1; }
+  const rm = p.removeKeywords || [];
+  const add = p.addKeywords || [];
+  const isCav = function (u) { return u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav"); };
+  const hit = function (u, kind) { return kind !== "cav" || isCav(u); };
+  for (const prov of DATA) {
+    const st = provState[prov.id];
+    if (!st || st.owner !== f) continue;
+    for (const u of st.units) {
+      for (const r of rm) {
+        if (!u.props || !hit(u, r.kind)) continue;
+        const i = u.props.indexOf(r.kw);
+        if (i >= 0) u.props.splice(i, 1);
+      }
+      for (const a of add) {
+        if (!hit(u, a.kind)) continue;
+        const list = u.props || (u.props = []);
+        if (list.indexOf(a.kw) < 0) list.push(a.kw);
+      }
+    }
+  }
+  return { capitalDev: typeof p.capitalDev === "number" ? p.capitalDev : 0 };
+});
+
+// 招降规则（顺·均田免赋）：支付 cost 钱，chance% 概率招降一个相邻地块及其守军，可重复尝试
+// 返回 { cost, chance }；两个数都缺就返回 undefined，让调用方走旧逻辑兜底。
+buffHook("action.zhao", function (c) {
+  const p = c.params || {};
+  const out = {};
+  if (typeof p.cost === "number") out.cost = p.cost;
+  if (typeof p.chance === "number") out.chance = p.chance;
+  if (out.cost === undefined && out.chance === undefined) return undefined;
+  return out;
+});
+
+// 招降守卫条件（顺·均田免赋）：不能是对方唯一有城市的地块
+// 返回 { block }，block 为真表示该地块不可招降。返回对象而不是裸布尔，
+// 是为了让 buffFirst(..., undefined) 能区分「没有这条 buff」（走旧逻辑兜底）和「有但不拦」。
+buffHook("action.zhaoGuard", function (c) {
+  const p = c.params || {};
+  if (p.rule === "notLastCity") return { block: c.ownerCities === 1 };
+  return { block: false };
+});
+
+// ===== AI 倾向类 =====
+
+// 辽·南北面官：AI 每建造阶段二选一（南面官＝升级城市便宜；北面官＝首都/行宫招骑兵便宜、骑兵带「远射」）
+// 调用方只提供局面事实（ctx.hasUpgradable / ctx.treasury），选哪边、阈值多少全看 params：
+//   southIf.upgradable   —— true 表示必须存在可升级的地块才考虑南面官
+//   southIf.treasuryBelow—— 国库低于此值才考虑南面官
+//   otherwise            —— 上述条件不成立时选哪边（"north"）
+// 返回 "south" / "north"；params 不成形时返回 undefined，调用方回落旧启发式。
+// 注意不能返回布尔 false：buffCollect 把 false 当"无结果"丢掉，所以用字符串表态。
+buffHook("ai.liaoChoose", function (c) {
+  const p = c.params || {};
+  const s = p.southIf;
+  if (!s || typeof s !== "object") return undefined;
+  let south = true;
+  if (s.upgradable && c.hasUpgradable !== true) south = false; // 没得升级，省钱无意义 → 走另一边
+  if (typeof s.treasuryBelow === "number" && !(c.treasury < s.treasuryBelow)) south = false; // 国库够厚 → 走另一边
+  if (south) return "south";
+  return p.otherwise === "south" ? "south" : "north";
+});
+
+// ===== 特殊动作 =====
+
+// 迁都（明·天子守国门 / 游牧三家）：目标地块、价格、次数限制、旧首都城级转移量全部看 params。
+// 返回对象而不是布尔——buffCollect 会把 false/0 当"无结果"丢掉，而明 cost:0 的"可以迁"也必须留得住。
+// 查不到 action.relocate 条目 = 该势力没有迁都权（党项就是靠这条被排除的，不用点名写死）。
+buffHook("action.relocate", function (c) {
+  const p = c.params || {};
+  return {
+    id: c.buff ? c.buff.id : "",
+    cost: typeof p.cost === "number" ? p.cost : 0,
+    targets: Array.isArray(p.targets) ? p.targets.slice() : null,
+    anywhere: p.anyway === true || p.anywhere === true,
+    once: p.once === true,
+    oncePerTarget: p.oncePerTarget === true,
+    transferCap: typeof p.transferCap === "number" ? p.transferCap : 0,
+    colorSkip: Array.isArray(p.colorSkip) ? p.colorSkip.slice() : []
+  };
+});
+
+// 取某势力的迁都规则；没有该条目返回 null（党项 / 已进化的游牧三代都走这条被拒）
+function buffRelocateRule(faction) {
+  if (!faction) return null;
+  const r = buffFirst(faction, "action.relocate", {}, null);
+  return (r && typeof r === "object") ? r : null;
+}
+
+// 迁都目标地块表（明：江南/燕云/广东）——迁都条目与首都战斗条目共用同一份 targets
+function buffRelocateTargets(faction) {
+  const out = [];
+  const list = buffsNow(faction);
+  for (let i = 0; i < list.length; i++) {
+    const b = list[i];
+    if (b.hook !== "action.relocate" && b.hook !== "battle.capitalMod") continue;
+    const t = (b.params && b.params.targets) || [];
+    for (let j = 0; j < t.length; j++) if (out.indexOf(t[j]) < 0) out.push(t[j]);
+  }
+  return out;
+}
+// ===== 剧本事件层 =====
+// 「按 scenarioId 分叉」的机制配置集中在这里，数据在 src/data/scenario-events.json
+// （构建时内联成 SCN_EVENTS 常量）。
+//
+// 迁过来的都是同一类东西：**这一局开在哪段历史**，整局生效的配置。
+//   debuff 名称与消除阈值、和议对象/名称/比例、冗官还是党争、开局外交关系。
+// 相较 buffs.json 那套「某势力有什么特性」，这里的主角是剧本而不是势力，
+// 所以独立一份数据、一套查询函数（scn* 前缀），不混进 buff 总线。
+//
+// 对应原来的三元表达式：
+//   scenarioId === "yidai" ? "女真" : "契丹"                   → scnDealTarget()
+//   scenarioId === "yidai" ? "绍兴和议" : "澶渊之盟"            → scnDealName()
+//   scenarioId === "jiashen" ? 300 : 200                       → scnDebuffNeed()
+//   scenarioId === "jiashen" ? "党争" : "冗官"                  → scnRonguan()
+//   wubeiName() 里那串嵌套三元                                   → scnDebuffName(f)
+//
+// 注意：scenarioId 在 19-modes.js 里用 let 声明，本模块先加载，
+// 顶层不许读它（会撞 TDZ），一律在函数体里惰性取值。
+
+const SCN_EVENTS = {"chenqiao":{"desc":"陈桥兵变：无 debuff；和议=澶渊之盟（契丹/辽）；开局 契丹-汉 满好感、宋-唐 敌对","debuff":{"name":"武备废弛","need":200},"deal":{"target":"契丹","name":"澶渊之盟","rate":0.25},"ronguan":"冗官","startup":{"relations":[["契丹","汉",100],["宋","唐",0]]}},"haishang":{"desc":"海上之盟：宋带澶渊之盟/冗官/武备废弛，武备废弛显示为「废弛」；开局 宋-金满好感","debuff":{"name":"废弛","need":200},"deal":{"target":"契丹","name":"澶渊之盟","rate":0.25},"ronguan":"冗官","startup":{"relations":[["契丹","蒙古",100],["契丹","女真",0],["宋","女真",100],["党项","契丹",75],["党项","宋",75]]}},"yidai":{"desc":"一代天骄：和议对象改女真（绍兴和议/金）；武备废弛女真叫「腐化」、其他「偏安」；开局 宋-蒙古满好感","debuff":{"name":"偏安","need":200,"nameByFaction":{"女真":"腐化"}},"deal":{"target":"女真","name":"绍兴和议","rate":0.25},"ronguan":"冗官","startup":{"relations":[["宋","女真",0],["蒙古","女真",0],["宋","蒙古",100],["党项","女真",75],["党项","契丹",75],["党项","宋",75]]}},"jiashen":{"desc":"甲申之变：明带缺饷/党争，军力阈值 300；开局 顺-明 敌对、明-女真 敌对","debuff":{"name":"缺饷","need":300},"deal":{"target":"契丹","name":"澶渊之盟","rate":0.25},"ronguan":"党争","startup":{"relations":[["顺","明",0],["明","女真",0]]}},"default":{"desc":"兜底：沙盒、自定义剧本、以及未单列的剧本，等价于原三元表达式的 else 分支","debuff":{"name":"武备废弛","need":200},"deal":{"target":"契丹","name":"澶渊之盟","rate":0.25},"ronguan":"冗官","startup":{"relations":[]}}};
+
+// 当前剧本 id；拿不到（加载早期 / 未初始化）就按沙盒算
+function scnId() {
+  try {
+    return typeof scenarioId === "string" && scenarioId ? scenarioId : "sandbox";
+  } catch (e) {
+    return "sandbox";
+  }
+}
+
+// 取当前剧本的事件配置
+//   scnCfg()          → { debuff, deal, ronguan, startup }
+//   scnCfg("debuff")  → { name, need }
+// 未收录的剧本（沙盒/自定义）走 default 兜底，等价于原来三元表达式的 else 分支。
+function scnCfg(key, id) {
+  const sid = id || scnId();
+  const all = SCN_EVENTS || {};
+  const cfg = all[sid] || all["default"] || {};
+  if (!key) return cfg;
+  return cfg[key] !== undefined ? cfg[key] : (all["default"] || {})[key];
+}
+
+// 武备废弛的剧本/势力专属名（效果一致）：
+// 甲申=缺饷、一代天骄=女真腐化/其他偏安、海上=废弛、其他=武备废弛
+function scnDebuffName(faction) {
+  const d = scnCfg("debuff") || {};
+  const byF = d.nameByFaction;
+  if (byF && byF[faction]) return byF[faction];
+  return d.name || "武备废弛";
+}
+
+// 武备废弛自动消除的军力阈值（甲申明朝 300 破关，其他统一 200）
+function scnDebuffNeed() {
+  const d = scnCfg("debuff") || {};
+  return d.need || 200;
+}
+
+// 和议：对象（契丹/女真）、名称（澶渊之盟/绍兴和议）、转移比例
+function scnDealTarget() {
+  const d = scnCfg("deal") || {};
+  return d.target || "契丹";
+}
+function scnDealName() {
+  const d = scnCfg("deal") || {};
+  return d.name || "澶渊之盟";
+}
+function scnDealRate() {
+  const d = scnCfg("deal") || {};
+  return d.rate || 0.25;
+}
+// 和议对手的简称：契丹=辽、女真=金
+function scnDealShort() {
+  return scnDealTarget() === "契丹" ? "辽" : "金";
+}
+
+// 冗官/党争的文案（甲申叫党争，其余叫冗官）
+function scnRonguan() {
+  return scnCfg("ronguan") || "冗官";
+}
+
+// 开局外交关系：[[甲, 乙, 好感], ...]
+function scnStartRelations() {
+  const s = scnCfg("startup") || {};
+  return s.relations || [];
+}
 // ---- 兵种造价（特殊兵种从 C 数据懒加载） ----
 let UNIT_COST = null;
 function ensureUnitCost() {
@@ -1129,10 +1573,13 @@ function calcTransfers() {
   for (const f in playerState) tr[f] = { in: 0, out: 0 };
   // 金（女真→金）：朝贡体系
   if (evolved["女真"] === "evolved") {
+    // buff: jin_tribute —— 比例从 buffs.json 读，取不到就退回旧值 0.2
+    const jinBuff = buffsOf("女真", "evolved").find(function (b) { return b.hook === "income.tributeIn"; });
+    const jinRate = jinBuff && jinBuff.params && typeof jinBuff.params.rate === "number" ? jinBuff.params.rate : 0.2;
     const jin = "女真";
     for (const g in playerState) {
       if (g !== jin && !eliminated[g] && isPeace(jin, g) && areAdjacent(jin, g)) {
-        const t = Math.round(calcIncome(g) * 0.2 * 100) / 100;
+        const t = Math.round(calcIncome(g) * jinRate * 100) / 100;
         tr[g].out += t; tr[jin].in += t;
       }
     }
@@ -1149,24 +1596,32 @@ function calcTransfers() {
       if (!adj) continue;
       neut += (p.dev || 0) * 2 * (s.city + 1) * (boardMode ? 1 : incomeMult); // 中立地块收入也乘倍率（与 calcIncomeRaw 一致）
     }
-    tr[jin].in += Math.round(neut * 0.2 * 100) / 100; // 金朝贡：相邻和平中立地块 20%
+    tr[jin].in += Math.round(neut * jinRate * 100) / 100; // 金朝贡：相邻和平中立地块 20%
   }
   // 和议（澶渊之盟/绍兴和议）：和平时期转移收入给对手（女真崛起→辽；一代天骄→金）
-  const dealT = scenarioId === "yidai" ? "女真" : "契丹";
+  const dealT = scnDealTarget(); // buff: scn-deal-target
   if (debuffState["宋"] && debuffState["宋"].chanyuan && playerState[dealT] && !eliminated[dealT] && isPeace("宋", dealT)) {
-    const t = Math.round(calcIncome("宋") * 0.25 * 100) / 100;
+    const t = Math.round(calcIncome("宋") * scnDealRate() * 100) / 100; // buff: scn-deal-rate
     tr["宋"].out += t;
     tr[dealT].in += t;
   }
   // 和议对象/名称：女真崛起=契丹（辽/澶渊之盟）；一代天骄=女真（金/绍兴和议）
-// 党项（定难节度，未进化才有）：转移20%收入给邻邦中军力最高的和平邻国
+  // buff: income.transferOut —— 谁有这条特性谁就转移收入（目前只有未进化的党项）
   tr["党项"] = tr["党项"] || { in: 0, out: 0 };
   tr["女真"] = tr["女真"] || { in: 0, out: 0 };
-  if (!eliminated["党项"] && !evolved["党项"]) {
-    const inc = calcIncome("党项");
+  function transferOutRateOf(f) {
+    if (!f || !playerState[f] || eliminated[f] || evolved[f]) return 0;
+    const b = buffsOf(f, "base").find(function (x) { return x.hook === "income.transferOut"; });
+    return b && b.params && typeof b.params.rate === "number" ? b.params.rate : 0;
+  }
+  for (const payer in playerState) {
+    const rate = transferOutRateOf(payer);
+    if (!rate) continue;
+    if (!tr[payer]) tr[payer] = { in: 0, out: 0 };
+    const inc = calcIncome(payer);
     let best = null, bestPower = -1;
     for (const g in playerState) {
-      if (g === "党项" || eliminated[g] || !isPeace("党项", g) || !areAdjacent("党项", g)) continue;
+      if (g === payer || eliminated[g] || !isPeace(payer, g) || !areAdjacent(payer, g)) continue;
       let pwr = 0;
       for (const p of DATA) {
         const s = provState[p.id];
@@ -1176,16 +1631,18 @@ function calcTransfers() {
       if (pwr > bestPower) { bestPower = pwr; best = g; }
     }
     if (best) {
-      const t = Math.round(inc * 0.2 * 100) / 100;
-      tr["党项"].out += t; tr[best].in += t;
+      if (!tr[payer]) tr[payer] = { in: 0, out: 0 };
+      if (!tr[best]) tr[best] = { in: 0, out: 0 };
+      const t = Math.round(inc * rate * 100) / 100;
+      tr[payer].out += t; tr[best].in += t;
     }
   }
   return tr;
 }
 
 // 收入计算（含严刑峻法/运河）
-function dealTarget() { return scenarioId === "yidai" ? "女真" : "契丹"; }
-function dealName() { return scenarioId === "yidai" ? "绍兴和议" : "澶渊之盟"; }
+function dealTarget() { return scnDealTarget(); } // buff: scn-deal-target
+function dealName() { return scnDealName(); } // buff: scn-deal-name
 function isDealParty(a, b) { const t = dealTarget(); return (a === "宋" && b === t) || (a === t && b === "宋"); }
 
 function calcIncome(f) {
@@ -1197,13 +1654,13 @@ function calcIncome(f) {
   return calcIncomeRaw(f);
 }
 function calcIncomeRaw(f) {
-  const isQin = f === "秦";
   let inc = 0;
   for (const p of DATA) {
     const s = provState[p.id];
     if (!s || s.owner !== f) continue;
     let pi = (s.dev || p.dev || 0) * 2 * (s.city + 1); // 新版：1 点发展度 = 2 钱 ×（城市等级 + 1）
-    if (isQin && s.units.length > 0) pi += 2;
+    // buff: qin_garrison_income —— 有己方军队驻扎的地块，收入额外 +2 钱
+    pi += buffSum(f, "income.provBonus", { prov: p, state: s }, 0);
     if (s.building === "运河") pi += 3 + (s.city || 0); // 运河收入随城市等级：3+城市等级（3~7），回本更快
     inc += pi;
   }
@@ -1551,12 +2008,13 @@ function buildEconCandidates(f, ps, own, opts) {
       }
     }
   }
-  if (!isNomadFaction(f) || f === "党项") {
+  // buff: nomad_no_upgrade —— 有"禁止升级"的势力不生成升级候选（游牧三家；党项没有这一条）
+  if (!buffAny(f, "build.cityForbidden", { what: "upgrade" })) {
     for (const p of own) {
       const st = provState[p.id];
       if (st.city >= 1 && st.city < 4) {
-        let cost = 20 - (st.building === "市舶司" ? 10 : 0);
-        if (isLiao(f) && liaoNorth === false) cost -= 5;
+        // buff: liao_south_upgrade —— 南面官：升级城市 −5
+        let cost = 20 + buffSum(f, "build.upgradeCost", { prov: p, city: st.city }, 0) - (st.building === "市舶司" ? 10 : 0);
         let roi = (st.dev || 0) > 0 ? cost / ((2 * (st.dev || 0) + (st.building === "运河" ? 1 : 0)) * incomeScale()) * 0.6 : 999;
         if (capProv && p.id === capProv.id && aiThreat(p.id, f) > 0) roi = roi * 0.5;
         eco.push({ t: "city", roi: roi, cost: cost, pid: p.id });
@@ -1566,8 +2024,9 @@ function buildEconCandidates(f, ps, own, opts) {
   for (const p of own) {
     const st = provState[p.id];
     if (st.city === 0 && (st.dev || 0) >= AI_PROFILE.buildDev) {
-      let cost = 20 + (isNomadFaction(f) && f !== "党项" ? 10 : 0) - (st.building === "市舶司" ? 10 : 0);
-      if (f === "明" && isMingBuffCap() && provinceById[p.id].name === (mutableCapital["明"] || CAPITAL_MAP["明"])) cost -= 5;
+      // buff: nomad_city_cost —— 建造城市 +10；buff: ming_capital_battle —— 明首都建城 −5
+      let cost = 20 + buffSum(f, "build.cityCost", { prov: p, city: st.city }, 0)
+        + buffCapitalBuildDelta(f, p) - (st.building === "市舶司" ? 10 : 0);
       if (st.building === "行宫") cost -= 20;
       const roiCity = (st.dev || 0) > 0 ? 20 / (2 * (st.dev || 0) * incomeScale()) * 0.5 : 999;
       eco.push({ t: "city", roi: roiCity, cost: cost, pid: p.id });
@@ -1904,7 +2363,7 @@ if (aiNeutralFocus) {
     for (const g in ePow) {
       const relG = getRel(f2, g);
       if (relG >= 70 && calcPower(f2) < 200) continue; // 关系好（≥70）：绝不打（军力≥200 进攻欲望大增，例外）
-      if (relG >= 30 && Math.random() < (calcPower(f2) >= 200 ? 0.15 : 0.5)) continue; // 中立：可能打（军力≥200 概率大增）
+      if (relG >= 30 && rand() < (calcPower(f2) >= 200 ? 0.15 : 0.5)) continue; // 中立：可能打（军力≥200 概率大增）
       if (ePow[g].cities === 1) {
         for (const p of DATA) { const st = provState[p.id]; if (st && st.owner === g && st.city >= 1 && armyCount(st) > 0) cands.push(p); }
       }
@@ -1920,7 +2379,7 @@ if (aiNeutralFocus) {
     for (const g of sorted) {
       const relG2 = getRel(f2, g);
       if (relG2 >= 80 && calcPower(f2) < 150) continue; // 关系极好且军力弱才不打（进攻欲望大增：≥70 也打）
-      if (relG2 >= 30 && Math.random() < (calcPower(f2) >= 150 ? 0.03 : 0.12)) continue; // 中立几乎必打（进攻欲望大增）
+      if (relG2 >= 30 && rand() < (calcPower(f2) >= 150 ? 0.03 : 0.12)) continue; // 中立几乎必打（进攻欲望大增）
       for (const p of DATA) {
         const st = provState[p.id];
         if (!st || st.owner !== g) continue; // 玩家空地也打（AI 更贪：占空地盘）
@@ -2124,9 +2583,8 @@ function aiExpansionBias(f2, p) {
   if (f2 === "秦" && p.terrain === "山地") return 25; // 秦：山地
   if (f2 === "汉" && p.terrain === "沙漠") return 25; // 汉：沙漠
   if (f2 === "隋" && isCoastal(p)) return 25; // 隋：沿海
-  if (f2 === "明" && (p.name === "江南" || p.name === "燕云" || p.name === "广东")) return 30; // 明：迁都三地
-  if ((f2 === "契丹" || f2 === "女真" || f2 === "蒙古") && ["准噶尔","漠南","河南","燕云","辽宁","黑龙江"].indexOf(p.name) >= 0) return 30; // 游牧：进化目标区
-  if (f2 === "党项" && ["河西","青海","陕西","陇右"].indexOf(p.name) >= 0) return 30; // 党项：进化目标区
+  if (f2 === "明" && MING_CAPITALS.indexOf(p.name) >= 0) return 30; // 明：迁都三地（复用数据）
+  if (isNomadFaction(f2) && parseEvolveReq(f2).indexOf(p.name) >= 0) return 30; // 游牧：进化目标区（复用 evolveReq）
   return 0;
 }
 // 敌方兵种组成分析（克制权重用）
@@ -2264,34 +2722,40 @@ function aiBuildTurn() {
     // 0. 南北面官：辽思考选择（有升级计划且国库 <60 → 南面官省钱，否则北面官）
     if (isLiao(f2) && liaoPhase !== currentTurn && gamePhase === "build") {
       const hasUpPlan = own.some(function(p) { const st = provState[p.id]; return st && st.city >= 1 && st.city < 4; });
-      setLiaoSystem(!(hasUpPlan && ps2.treasury < 60));
+      // buff: liao_choose —— 选南还是选北、国库阈值都来自 buffs.json；没这条数据时回落旧启发式
+      const liaoPick = buffFirst(f2, "ai.liaoChoose", { hasUpgradable: hasUpPlan, treasury: ps2.treasury }, "");
+      setLiaoSystem(liaoPick === "north" ? true
+        : liaoPick === "south" ? false
+        : !(hasUpPlan && ps2.treasury < 60));
       return setTimeout(aiBuildStep, 15); // 建造步进加速
     }
     // 0.5 迁都思考（本回合已迁过则跳过——防 AI 每步重试迁都被拦导致无限循环卡死）
-    if (f2 === "明" && mingCapMovedTurn !== currentTurn) {
+    const _mvRule = buffRelocateRule(f2);
+    if (_mvRule && _mvRule.oncePerTarget && mingCapMovedTurn !== currentTurn) {
       let bestM = null, bestValM = -1;
-      const curM = mutableCapital["明"] || CAPITAL_MAP["明"];
-      // 首都为燕云/广东/江南 且 邻接其他玩家地块 → 首都安全，不主动迁都（两淮无所谓，可迁）
+      const curM = mutableCapital[f2] || CAPITAL_MAP[f2];
+      const _mvTargets = _mvRule.targets || [];
+      // 首都已在这几个目标地块里 且 邻接其他玩家地块 → 首都安全，不主动迁都（默认首都不算，可迁）
       const curP = provByName(curM);
-      const safeCap = (curM === "燕云" || curM === "广东" || curM === "江南") && curP &&
+      const safeCap = _mvTargets.indexOf(curM) >= 0 && curP &&
         (NEIGHBORS[curM] || []).some(function(n) {
           const np2 = provByName(n); if (!np2) return false;
           const ns2 = provState[np2.id];
           return ns2 && ns2.owner && ns2.owner !== "明";
         });
       if (!safeCap) {
-        for (const nm of MING_CAPITALS) {
+        for (const nm of _mvTargets) {
           if (mingMovedTo[nm]) continue;
           const pm = provByName(nm); if (!pm) continue;
           const sm = provState[pm.id];
-          if (!sm || sm.owner !== "明") continue;
+          if (!sm || sm.owner !== f2) continue;
           const val = (sm.dev || 0) * 2 * (sm.city + 1);
           if (val > bestValM) { bestValM = val; bestM = pm; }
         }
         if (bestM && bestM.name !== curM) { mingMoveCapital(bestM.id); return setTimeout(aiBuildStep, 15); }
       }
-    } else if (isNomadFaction(f2) && f2 !== "党项" && !nomadMoved[f2] && ps2.treasury >= 5) {
-      if (Math.random() < 0.25) {
+    } else if (buffRelocateRule(f2) && !nomadMoved[f2] && ps2.treasury >= buffRelocateRule(f2).cost) { // buff: action.relocate
+      if (rand() < 0.25) {
         let bestN = null, bestValN = -1;
         const curN = mutableCapital[f2] || CAPITAL_MAP[f2];
         for (const pn of own) {
@@ -2386,7 +2850,7 @@ function aiBuildTurn() {
       if (milOps.length) {
         let wSum = 0;
         for (const op of milOps) wSum += op.w;
-        let r = Math.random() * wSum;
+        let r = rand() * wSum;
         let chosen = milOps[0];
         for (const op of milOps) { r -= op.w; if (r <= 0) { chosen = op; break; } }
         spentMil += chosen.cost;
@@ -2592,14 +3056,17 @@ function buildCity(pid) {
   const ps = playerState[s.owner];
   if (!ps) return;
   if (s.city >= 4) { showToast("城市已满级"); return; }
-  if (isNomadFaction(s.owner) && s.owner !== "党项" && s.city >= 1) { showToast("游牧禁止升级城市"); return; }
+  const cityProv = provinceById[pid];
+  // buff: nomad_no_upgrade —— 游牧三家未建立王朝时禁止升级城市（党项的 buff 列表里没有这一条）
+  if (s.city >= 1 && buffAny(s.owner, "build.cityForbidden", { what: "upgrade", prov: cityProv, city: s.city })) { showToast("游牧禁止升级城市"); return; }
   const cityBase = 20; // 建城/升级统一 20（2026-08-17 平衡调整）
-  // 游牧 / 定难节度：建造城市 +10（只作用于建城；党项的升级城市不加此项）
-  const nomadBuildAdd = (isNomadFaction(s.owner) && s.owner !== "党项") ? 10 : 0; // 定难节度没有建城加价
-  let cost = cityBase + nomadBuildAdd - (s.building === "市舶司" ? 10 : 0);
-  if (s.owner === "明" && isMingBuffCap() && provinceById[pid].name === (mutableCapital["明"] || CAPITAL_MAP["明"])) cost -= 5; // 天子守国门：首都建城-5
+  // buff: nomad_city_cost / liao_south_upgrade / ming_capital_battle —— 建城 +10、南面官升级 −5、明首都 −5
+  let cost = cityBase
+    + buffSum(s.owner, "build.cityCost", { prov: cityProv, city: s.city }, 0)
+    + buffSum(s.owner, "build.upgradeCost", { prov: cityProv, city: s.city }, 0)
+    + buffCapitalBuildDelta(s.owner, cityProv);
+  cost -= (s.building === "市舶司" ? 10 : 0);
   if (s.building === "行宫" && s.city === 0) cost -= 20; // 陪都：仅白地新建-20，升级不吃
-  if (isLiao(s.owner) && liaoNorth === false && s.city >= 1) cost -= 5; // 南面官：仅升级城市-5
   if (cost < 0) cost = 0; // 价格不为负
   if (ps.treasury < cost) { if (!aiBusy) showToast("国库不足"); return; } // AI 回合：国库不足临时取消（静默）
   ps.treasury -= cost;
@@ -2610,7 +3077,7 @@ function buildCity(pid) {
     debuffState[s.owner].rgCount++;
     if (debuffState[s.owner].rgCount >= 10) {
       debuffState[s.owner].ronguan = false;
-      const ronguanTxt2 = scenarioId === "jiashen" ? "党争" : "冗官";
+      const ronguanTxt2 = scnRonguan(); // buff: scn-ronguan
       chronicleAdd("宋 完成冗官改革，" + ronguanTxt2 + "消除");
       showToast(ronguanTxt2 + "已消除！");
     }
@@ -2803,13 +3270,13 @@ function giveMoney(f) {
 // 剧本特殊机制（debuff）显示 + 武备进度检查
 // 武备废弛按剧本/势力专属名（效果一致）：甲申=缺饷、一代天骄=女真腐化/其他偏安、海上=废弛、其他=武备废弛
 function wubeiName(f) {
-  return scenarioId === "jiashen" ? "缺饷" : scenarioId === "yidai" ? (f === "女真" ? "腐化" : "偏安") : scenarioId === "haishang" ? "废弛" : "武备废弛";
+  return scnDebuffName(f); // buff: scn-debuff-name
 }
 function debuffLines(f, power) {
   const d = debuffState[f];
   if (!d) return "";
   // 武备废弛：军力达标自动移除（甲申明朝 300 破关，其他统一 200）
-  const wubeiNeed = scenarioId === "jiashen" ? 300 : 200;
+  const wubeiNeed = scnDebuffNeed(); // buff: scn-debuff-need
   if (d.wubei && power >= wubeiNeed) {
     d.wubei = false;
     const wubeiTxt2 = wubeiName(f);
@@ -2819,8 +3286,8 @@ function debuffLines(f, power) {
   }
   const lines = [];
   const wubeiTxt = wubeiName(f); // 武备废弛按剧本/势力专属名（效果一致）
-  if (d.chanyuan) lines.push(dealName() + "：转移 25% 收入给" + (dealTarget() === "契丹" ? "辽" : "金") + "（开战即废除）");
-  if (d.ronguan) lines.push((scenarioId === "jiashen" ? "党争" : "冗官") + "：收入 -25%（建设城市 " + (d.rgCount || 0) + "/10）");
+  if (d.chanyuan) lines.push(dealName() + "：转移 25% 收入给" + scnDealShort() + "（开战即废除）"); // buff: scn-deal-short
+  if (d.ronguan) lines.push(scnRonguan() + "：收入 -25%（建设城市 " + (d.rgCount || 0) + "/10）"); // buff: scn-ronguan
   if (d.wubei) lines.push(wubeiTxt + "：军队战力 -1（军力 " + power + "/" + wubeiNeed + "）");
   return lines.length ? "<div class='debuff'>" + lines.join("<br>") + "</div>" : "";
 }
@@ -2834,6 +3301,15 @@ function canEvolve(f) {
   const req = C[f].evolveReq;
   if (!req) return false;
   const areas = parseEvolveReq(f);
+  // buff: liao_evolve_req / jin_evolve_req / yuan_evolve_req / dangxiang_evolve_req
+  // 需求地区表出自 evolveReq 文本，阈值（2 地区 / 3 城市等级）由 buffs.json 声明
+  const _reqs = buffCollect(f, "evolve.req", { areas: areas });
+  if (_reqs.length) {
+    let _ok = false;
+    for (const r of _reqs) if (r && r.ok) _ok = true;
+    return _ok;
+  }
+  // 兜底：buffs.json 里没有 evolve.req 条目时沿用通用判定
   let owned = 0, cityLevels = 0;
   for (const p of DATA) {
     const s = provState[p.id];
@@ -2843,20 +3319,37 @@ function canEvolve(f) {
   }
   return owned >= 2 && cityLevels >= 3;
 }
-// 明朝特性「天子守国门」：可主动迁都至四地（全局一次）
+// 明朝特性「天子守国门」：可主动迁都至 buffs.json 声明的目标地块（每块各限一次）
 // 明 buff 生效条件：首都为江南/燕云/广东（两淮默认首都不享受；被动迁都到别处也失效）
+// buff: ming_relocate / ming_capital_battle —— 目标地块表统一从数据的 targets 读
 function isMingBuffCap() {
   const c = mutableCapital["明"] || CAPITAL_MAP["明"];
-  return c === "江南" || c === "燕云" || c === "广东";
+  const t = buffRelocateTargets("明");
+  return (t.length ? t : MING_CAPITALS).indexOf(c) >= 0;
 }
-const MING_CAPITALS = ["江南","燕云","广东"]; // 迁都目标（两淮为默认首都，不可迁回）
+const MING_CAPITALS = ["江南","燕云","广东"]; // 迁都目标（两淮为默认首都，不可迁回）；数据缺条目时的兜底
 let mingMovedTo = {}; // 按地块记录：每个目标地块各限一次
 let mingColorCap = null; // 明主动迁都后的颜色首都（被动迁都不换色）
+// 地图上「这个势力该用哪个地块的颜色」：只有明主动迁都才换，且迁到 colorSkip 里的地块不换
+function factionDisplayCapital(f) {
+  if (!f) return null;
+  const def = CAPITAL_MAP[f];
+  if (f !== "明") return def;
+  const mc = mutableCapital["明"] || def;
+  if (mingColorCap) return mingColorCap;
+  const rule = buffRelocateRule("明");
+  const skip = (rule && rule.colorSkip) || [];
+  return (mc === "燕云" || mc === "广东") && skip.indexOf(mc) < 0 ? mc : def;
+}
 let mingCapMovedTurn = -1; // 明每建造阶段限迁都一次
 function canMingMove(prov) {
   const st = provState[prov.id];
+  // buff: ming_relocate —— 目标地块 / 每块各限一次，都读数据；缺条目时回落旧常量
+  const _mr = buffRelocateRule("明");
+  const _targets = (_mr && _mr.targets) ? _mr.targets : MING_CAPITALS;
+  const _oncePerTarget = _mr ? _mr.oncePerTarget : true;
   return picks[currentPlayerIdx] === "明" && st && st.owner === "明" &&
-         MING_CAPITALS.indexOf(prov.name) >= 0 && !mingMovedTo[prov.name] &&
+         _targets.indexOf(prov.name) >= 0 && !(_oncePerTarget && mingMovedTo[prov.name]) &&
          prov.name !== (mutableCapital["明"] || CAPITAL_MAP["明"]);
 }
 function mingMoveCapital(pid) {
@@ -2866,9 +3359,18 @@ function mingMoveCapital(pid) {
   if (picks[currentPlayerIdx] !== "明") { showToast("现在不是明的回合"); return; }
   if (!canMingMove(prov)) { showToast("迁都条件不满足"); return; }
   if (mingCapMovedTurn === currentTurn) { showToast("本建造阶段已迁都"); return; }
+  // buff: ming_relocate —— 价格由数据声明（明 cost:0，免费；0 时整段不执行，与旧代码一样不碰国库）
+  const _mmRule = buffRelocateRule("明");
+  const _mmCost = _mmRule ? _mmRule.cost : 0;
+  if (_mmCost > 0) {
+    const _mmPs = playerState["明"];
+    if (!_mmPs || _mmPs.treasury < _mmCost) { showToast("国库不足"); return; }
+    _mmPs.treasury -= _mmCost;
+  }
   mingCapMovedTurn = currentTurn;
   mutableCapital["明"] = prov.name;
-  if (prov.name !== "江南") mingColorCap = prov.name; // 主动迁都换色（迁都江南不换：与晋首都同色会重合）
+  const _skip = (buffRelocateRule("明") || {}).colorSkip || [];
+  if (_skip.indexOf(prov.name) < 0) mingColorCap = prov.name; // 主动迁都换色（默认跳过江南：与晋首都同色会重合）
   SFX.turn();
   chronicleAdd("明 迁都至 " + prov.name);
   mingMovedTo[prov.name] = true;
@@ -2878,28 +3380,36 @@ function mingMoveCapital(pid) {
   showToast("明 迁都至 " + prov.name);
   recordReplayFrame(); // 读史：迁都导致的首都变化
 }
-// 游牧迁都（5钱，全局一次，旧首都-1级/新首都+1级）
+// 游牧迁都（价格/次数/城级转移量全部来自 buffs.json 的 action.relocate 条目）
 let nomadMoved = {}; // 每个游牧势力各限一次迁都
 function nomadMoveCapital(pid) {
   if (gamePhase !== "build") { showToast("行动阶段不可建造"); return; }
   const f = picks[currentPlayerIdx];
-  if (!f || !isNomadFaction(f) || f === "党项") return; // 定难节度无迁都
+  if (!f || !isNomadFaction(f)) return;
+  // buff: nomad_relocate / nomad_relocate_nv / nomad_relocate_mg
+  // 查不到迁都条目就不许迁都——党项没有这条词条，自然被排除，不再点名判断
+  const _nr = buffRelocateRule(f);
+  if (!_nr) return;
   const prov = provinceById[pid];
   const st = provState[pid];
   if (!prov || !st || st.owner !== f) return;
   const oldCap = mutableCapital[f] || CAPITAL_MAP[f];
   if (prov.name === oldCap) { showToast("这里已是首都"); return; }
-  if (nomadMoved[f]) { showToast("该势力迁都已使用过"); return; }
+  if (_nr.once && nomadMoved[f]) { showToast("该势力迁都已使用过"); return; }
   const ps = playerState[f];
-  if (ps.treasury < 5) { showToast("国库不足"); return; }
-  ps.treasury -= 5;
-  nomadMoved[f] = true;
-  // 旧首都转移 1 级城市等级至新首都：新都已满级/旧都无级时不转移（双方等级守恒）
+  const _nCost = _nr.cost;
+  if (ps.treasury < _nCost) { showToast("国库不足"); return; }
+  ps.treasury -= _nCost;
+  if (_nr.once) nomadMoved[f] = true;
+  // 旧首都转移 transferCap 级城市等级至新首都：新都已满级/旧都无级时不转移（双方等级守恒）
   let _nmOldLv = -1; const _nmNewLv = st.city;
   for (const p of DATA) {
     if (p.name === oldCap) {
       const os = provState[p.id];
-      if (os && os.city > 0 && st.city < 4) { os.city--; st.city++; _nmOldLv = os.city; }
+      if (os) {
+        const _mv = Math.min(_nr.transferCap || 0, os.city, 4 - st.city);
+        if (_mv > 0) { os.city -= _mv; st.city += _mv; _nmOldLv = os.city; }
+      }
       break;
     }
   }
@@ -2911,13 +3421,14 @@ function nomadMoveCapital(pid) {
     bldgDestroyFx(prov);
     chronicleAdd(displayName(f) + " 迁都至行宫旧址，行宫被摧毁（+20 钱补偿）");
   }
+  const _nTag = _nCost > 0 ? "（-" + _nCost + " 钱）" : "";
   SFX.turn();
-  chronicleAdd(displayName(f) + " 迁都至 " + prov.name + "（-5 钱）");
+  chronicleAdd(displayName(f) + " 迁都至 " + prov.name + _nTag);
   if (_nmOldLv >= 0) chronicleAdd(displayName(f) + " 在 " + oldCap + " 城市降低至 Lv" + _nmOldLv + "（迁都）");
   if (st.city > _nmNewLv) chronicleAdd(displayName(f) + " 在 " + prov.name + " 升级城市 Lv" + _nmNewLv + "→Lv" + st.city + "（迁都）");
   updateProvLabels();
   showProvinceInfo(prov);
-  showToast(f + " 迁都至 " + prov.name + "（-5 钱）");
+  showToast(f + " 迁都至 " + prov.name + _nTag);
   recordReplayFrame(); // 读史：迁都导致的首都变化
 }
 function evolveFaction(f, branch) {
@@ -2928,52 +3439,11 @@ function evolveFaction(f, branch) {
   SFX.sword();
   setTimeout(function() { if (!aiBusy) SFX.capture(); }, 220); // 进化：双斩 + 清脆定音（AI 回合静音）
   chronicleAdd(displayName(f) + " 成立王朝");
-  if (f === "契丹") {
-    liaoNorth = null; liaoPhase = -1; // 成辽后需重新选
-    // 游牧特性消失：移除现有契丹骑兵的「远射」「劫掠」（北面官选择时再加）
-    for (const p of DATA) {
-      const s = provState[p.id];
-      if (!s || s.owner !== "契丹") continue;
-      for (const u of s.units) {
-        if (!u.props) continue;
-        for (const kw of ["远射", "劫掠"]) {
-          const i = u.props.indexOf(kw);
-          if (i >= 0) u.props.splice(i, 1);
-        }
-      }
-    }
-  }
-  if (f === "女真" || f === "党项") {
-    // 失去游牧/定难节度：移除现有骑兵的「远射」「劫掠」（蒙古→元仍保留，元特性会给远射）
-    for (const p of DATA) {
-      const s = provState[p.id];
-      if (!s || s.owner !== f) continue;
-      for (const u of s.units) {
-        if (!u.props) continue;
-        const isCavK = u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav");
-        if (!isCavK) continue;
-        for (const kw of ["远射", "劫掠"]) {
-          const i = u.props.indexOf(kw);
-          if (i >= 0) u.props.splice(i, 1);
-        }
-      }
-    }
-  }
-  if (f === "蒙古") {
-    // 蒙古和平：游牧特性消失，移除骑兵「劫掠」；现有军队获得「驿站」和「远射」
-    for (const p of DATA) {
-      const s = provState[p.id];
-      if (!s || s.owner !== "蒙古") continue;
-      for (const u of s.units) {
-        const list = u.props || (u.props = []);
-        const ri = list.indexOf("劫掠");
-        if (ri >= 0) list.splice(ri, 1);
-        if (list.indexOf("驿站") < 0) list.push("驿站");
-        const isCavK = u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav");
-        if (isCavK && list.indexOf("远射") < 0) list.push("远射");
-      }
-    }
-  }
+  // buff: liao_evolve / jin_evolve / yuan_evolve / dangxiang_evolve
+  // 进化差异（摘词条 / 补词条 / 清北面官状态 / 首都发展度）全部声明在 buffs.json，换国号后逐条执行
+  const _evoList = buffCollect(f, "evolve.onEvolve", {});
+  const _evo = { capitalDev: 0 };
+  for (const r of _evoList) if (r && typeof r.capitalDev === "number") _evo.capitalDev += r.capitalDev;
   // 首都 +1 级（当前首都，迁都后生效在新都）
   const cap = mutableCapital[f] || CAPITAL_MAP[f];
   for (const p of DATA) {
@@ -2981,7 +3451,7 @@ function evolveFaction(f, branch) {
       const s = provState[p.id];
       if (s && s.owner === f) { // 首都可能已被攻陷（挂起迁都）：只升级仍属于己方的首都，防给敌方城市升级
         if (s.city < 4) { const _evOldLv = s.city; s.city++; chronicleAdd(displayName(f) + " 在 " + cap + " 升级城市 Lv" + _evOldLv + "→Lv" + s.city + "（王朝建立）"); }
-        if (f === "党项") { s.dev = Math.min(DEV_MAX, (s.dev || 0) + 1); chronicleAdd(displayName(f) + " 在 " + cap + " 提升发展度至 " + s.dev + "（王朝建立）"); } // 定难节度进化：首都+1发展度（上限10）
+        if (_evo.capitalDev) { s.dev = Math.min(DEV_MAX, (s.dev || 0) + _evo.capitalDev); chronicleAdd(displayName(f) + " 在 " + cap + " 提升发展度至 " + s.dev + "（王朝建立）"); } // 定难节度进化：首都+1发展度（上限10，buff: dangxiang_evolve）
       }
       break;
     }
@@ -3383,7 +3853,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     let defU;
     if (atkIsRng) {
       const armored = dst.units.find(function(u) { return hasKeyword(u, "重甲"); });
-      defU = armored || aiBestRngTarget(atkU, dst.units, src, dst, tgt, atkProv) || dst.units[Math.floor(Math.random() * dst.units.length)]; // 智能期望选目标
+      defU = armored || aiBestRngTarget(atkU, dst.units, src, dst, tgt, atkProv) || dst.units[Math.floor(rand() * dst.units.length)]; // 智能期望选目标
     } else {
       defU = pickDefender(dst.units, atkU.kind, atkU.name);
     }
@@ -3392,11 +3862,11 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
     SFX.dice();
     const advAtk = hasTroopAdvantage(src.owner, srcPid, tgtPid); // 兵力优势：每轮单挑前实时判定
     // 兵力优势掷两次取高：史官记录「大/小」两个原始骰子
-    const _rollA = 1 + Math.floor(Math.random() * 6);
-    const _rollB = advAtk ? 1 + Math.floor(Math.random() * 6) : 0;
+    const _rollA = 1 + Math.floor(rand() * 6);
+    const _rollB = advAtk ? 1 + Math.floor(rand() * 6) : 0;
     const d1 = advAtk ? Math.max(_rollA, _rollB) : _rollA;
     const d1txt = advAtk ? d1 + "/" + Math.min(_rollA, _rollB) : null;
-    const d2 = 1 + Math.floor(Math.random() * 6);
+    const d2 = 1 + Math.floor(rand() * 6);
     const bm = calcBattleMods(atkU, defU, src, dst, tgt, atkProv);
     const a = Math.max(1, Math.min(10, d1 + bm.atk.total));
     const b = Math.max(1, Math.min(10, d2 + bm.def.total));
@@ -3506,13 +3976,16 @@ function zhaoTargetsList() {
     const s = provState[p.id];
     if (!s || !s.owner || s.owner === f) continue;
     // 不能是对方唯一有城市的地块
+    // buff: shun_zhao_guard —— 规则走 params.rule；缺条目时退回旧硬编码（cities === 1 即拦）
     if (s.city >= 1) {
       let cities = 0;
       for (const q of DATA) {
         const qs = provState[q.id];
         if (qs && qs.owner === s.owner && qs.city >= 1) cities++;
       }
-      if (cities === 1) continue;
+      const guard = buffFirst(f, "action.zhaoGuard", { ownerCities: cities, city: s.city }, undefined);
+      const blocked = guard ? !!guard.block : (cities === 1);
+      if (blocked) continue;
     }
     // 与顺的地块相邻
     const nbs = NEIGHBORS[p.name] || [];
@@ -3541,12 +4014,15 @@ function zhaoDo(pid) {
   const f = "顺";
   const ps = playerState[f];
   if (!ps) return;
-  const cost = 20;
+  // buff: shun_zhao —— 20 钱 / 16.6% 都来自 params；缺条目时退回旧硬编码，行为不变
+  const zhaoRule = buffFirst(f, "action.zhao", {}, { cost: 20, chance: 16.6 });
+  const cost = (zhaoRule && typeof zhaoRule.cost === "number") ? zhaoRule.cost : 20;
+  const chance = (zhaoRule && typeof zhaoRule.chance === "number") ? zhaoRule.chance : 16.6;
   if (ps.treasury < cost) { showToast("国库不足"); return; }
   ps.treasury -= cost;
   zhaoActive = false;
   octx.clearRect(0, 0, W, H);
-  if (Math.random() * 100 < 16.6) {
+  if (rand() * 100 < chance) {
     const prov = provinceById[pid];
     const oldOwner = provState[pid].owner;
     provState[pid].owner = f; // 地块及守军归顺
@@ -3907,11 +4383,10 @@ function applyLoadedSave(d) {
 const DEV_BASE = {"农田":4,"平原":5,"旱地":6,"森林":7,"草原":7,"丘陵":8,"丛林":9,"山地":9,"高原":7,"沙漠":10};
 const DEV_MAX = 10; // 发展度上限
 function devPrice(prov, faction) {
-  // 单点地形价格（不含发展度乘数）；势力特性直接扣减
+  // 单点地形价格（不含发展度乘数）；势力特性的折扣由 buff 总线累加
   let price = DEV_BASE[prov.terrain] !== undefined ? DEV_BASE[prov.terrain] : 5;
-  if (faction === "秦" && prov.terrain === "山地") price -= 4;
-  if (faction === "汉" && prov.terrain === "沙漠") price -= 4;
-  if (faction === "晋") price -= 2;
+  // buff: qin_mountain_dev / han_desert_dev / jin_all_dev —— 地形折扣从 buffs.json 读
+  price += buffSum(faction, "dev.price", { prov: prov }, 0);
   return price < 0 ? 0 : price;
 }
 function devCost(prov, s, faction) {
@@ -3977,13 +4452,15 @@ function updateEvoArea() {
     h += "<button class='rbtn" + (liaoNorth === true ? " ac" : "") + "' onclick='setLiaoSystem(true)'" + (locked ? " disabled" : "") + ">北面官</button>";
     h += "<div style='color:#aaa;font-size:13px;margin:4px 0'>当前：" + (liaoNorth === null ? "未选择" : (liaoNorth ? "北面官" : "南面官")) + "</div>";
   }
-  // 顺·均田免赋
-  if (f === "顺") {
-    h += "<button class='rbtn' onclick='zhaoShow()'>执行招降（20 钱）</button>";
+  // 均田免赋（顺）：有 action.zhao buff 的势力才显示入口，价格也读数据
+  const zhaoRule = f ? buffFirst(f, "action.zhao", {}, null) : null;
+  if (zhaoRule) {
+    const zc = zhaoRule.cost !== undefined ? zhaoRule.cost : 20;
+    h += "<button class='rbtn' onclick='zhaoShow()'>执行招降（" + zc + " 钱）</button>";
   }
   // 进化区（仅未进化的游牧）
-  const isNomad = f && (f === "契丹" || f === "女真" || f === "蒙古" || f === "党项");
-  if (isNomad && !evolved[f] && C[f] && C[f].evolveReq) {
+  const isNomad = f && isNomadFaction(f); // 名单统一走 isNomadFaction（内已含 !evolved，与原组合等价）
+  if (isNomad && C[f] && C[f].evolveReq) {
     const d = C[f];
     const ok = canEvolve(f);
     const phaseOk = gamePhase === "build";
@@ -4224,7 +4701,7 @@ function factionSummaryLine(f) {
   const _dbt = [];
   if (_d) {
     if (_d.chanyuan) _dbt.push("澶渊之盟");
-    if (_d.ronguan) _dbt.push((scenarioId === "jiashen" ? "党争" : "冗官") + (_d.rgCount || 0) + "/10");
+    if (_d.ronguan) _dbt.push(scnRonguan() + (_d.rgCount || 0) + "/10"); // buff: scn-ronguan
     if (_d.wubei) _dbt.push(wubeiName(f));
   }
   const dbtTxt = _dbt.length ? "　状态 " + _dbt.join("、") : "";
@@ -5153,7 +5630,7 @@ function goalText(g, f) {
     case "evolve": return "建立王朝";
     case "conquer": return "占领 " + g.v;
     case "income": return "回合收入达到 " + g.v + " 钱";
-    case "nodebuff": { const names = { chanyuan: dealName(), ronguan: (scenarioId === "jiashen" ? "党争" : "冗官"), wubei: wubeiName(f) }; return "消除" + (names[g.v] || g.v); }
+    case "nodebuff": { const names = { chanyuan: dealName(), ronguan: scnRonguan() /* buff: scn-ronguan */, wubei: wubeiName(f) }; return "消除" + (names[g.v] || g.v); }
     case "or": return g.list.map(function(sub) {
       if (Array.isArray(sub)) return sub.map(function(gg) { return goalText(gg, f); }).join("、");
       return goalText(sub, f);
@@ -5260,7 +5737,7 @@ function showGameOver(w, mode, final) {
   // 国家颜色 = 势力固定色（默认首都色；只有明迁都换色，剧本覆盖的首都不算）
   const factionColor = f => {
     let cap = CAPITAL_MAP[f];
-  if (f === "明") { const mc = mutableCapital["明"] || CAPITAL_MAP["明"]; cap = mingColorCap || ((mc === "燕云" || mc === "广东") ? mc : CAPITAL_MAP["明"]); }
+  cap = factionDisplayCapital(f) || cap; // 明迁都换色的统一入口
     const p = provByName(cap);
     if (p && p.rgb) return "rgb(" + p.rgb[0] + "," + p.rgb[1] + "," + p.rgb[2] + ")";
     return "#ffd700";
@@ -5309,13 +5786,16 @@ let _goFinal = true, _goHiddenUI = [];
 let mutableCapital = {}; // 当前首都（可迁都）
 let forceReloc = null; // 强制迁都模式：玩家首都丢失后暂停，要求手动迁都（不消耗明/游牧迁都次数）
 function isHumanFaction(f) { for (let hi = 0; hi < pickOrder.length; hi++) { if (picks[hi] === f) return !!pickOrder[hi] && pickOrder[hi].type === "human"; } return false; }
-function isNomadFaction(f) { return !evolved[f] && (f === "契丹" || f === "女真" || f === "蒙古" || f === "党项"); }
+// 游牧 = 数据里有 evolveReq（可进化）且尚未进化的势力；名单不再写死在代码里
+function isNomadFaction(f) { return !!f && !evolved[f] && !!(C[f] && C[f].evolveReq); }
 function canRecruit(s, def) {
   if (def.name === "楼船" && s.building !== "运河") return false; // 只能在运河地块建造
   if (def.req.indexOf("无需") >= 0) return true;
   const m = def.req.match(/需城市 (\d) 级/);
   let need = m ? parseInt(m[1]) : 99;
-  if (def.kind === "cav" && isNomadFaction(s.owner)) need = Math.min(need, 1); // 游牧骑兵 1 级城可招
+  // buff: nomad_cav_lv1 / dangxiang_cav_lv1 —— 骑兵允许在 1 级城市招募（进化后失效）
+  const cavMin = buffFirst(s.owner, "build.cavInCity", { cityLv: s.city, kind: def.kind }, 99);
+  if (cavMin < need) need = cavMin;
   if (def.name === "骑兵" && s.building === "行宫") need = 0; // 捺钵：行宫允许招募骑兵
   return s.city >= need;
 }
@@ -5324,13 +5804,15 @@ function whyNot(st, def) {
   if (def.req.indexOf("无需") >= 0) return "";
   const m = def.req.match(/需城市 (\d) 级/);
   let need = m ? parseInt(m[1]) : 99;
-  if (def.kind === "cav" && isNomadFaction(st.owner)) need = Math.min(need, 1);
+  const cavMin = buffFirst(st.owner, "build.cavInCity", { cityLv: st.city, kind: def.kind }, 99); // buff: nomad_cav_lv1
+  if (cavMin < need) need = cavMin;
   if (st.city < need) return "等级不足";
   return "";
 }
 // 辽（契丹进化）南北面官：null=未选择 false=南面官 true=北面官
 let liaoNorth = null;
-function isLiao(f) { return f === "契丹" && evolved["契丹"]; }
+// 辽制 = 已经进化成「辽」的势力（数据里 C[x].evolved === "辽"），不写死势力名
+function isLiao(f) { return !!f && !!evolved[f] && !!C[f] && C[f].evolved === "辽"; }
 function hasXingGong() {
   for (const p of DATA) {
     const s = provState[p.id];
@@ -5381,14 +5863,10 @@ function provOfState(s) {
 // 招募价格（含势力折扣：唐 骑兵-3 / 辽北面官首都行宫骑兵-3）
 function unitCostWithDiscount(faction, def, s) {
   let c = def.cost;
-  // 天可汗：骑兵价格-3（含骑兵类特殊兵种，如玄甲军）
-  const isCavKind = def.kind === "cav" || (def.kind === "spec" && SPEC_TYPE[def.name] === "cav");
-  if (faction === "唐" && isCavKind) c -= 3;
-  if (isLiao(faction) && liaoNorth === true && def.name === "骑兵" && s) {
-    const cap = mutableCapital[faction] || CAPITAL_MAP[faction];
-    const prov = provOfState(s); // 原写法 provinceById[s.id]：s.id 恒为 undefined，北面官折扣一直没生效
-    if (prov && (prov.name === cap || s.building === "行宫")) c -= 3;
-  }
+  // buff: tang_cav_discount / liao_north_cav —— 招募折扣全部走数据
+  const unitKind = def.kind === "spec" ? (SPEC_TYPE[def.name] || "inf") : def.kind;
+  const prov = s ? provOfState(s) : null; // 原写法 provinceById[s.id]：s.id 恒为 undefined，北面官折扣一直没生效
+  c += buffSum(faction, "unit.recruitCost", { unitName: def.name, unitKind: unitKind, prov: prov, building: s ? s.building : "" }, 0);
   return Math.max(0, c); // 价格不为负
 }
 function getRecruitable(faction) {
@@ -5504,14 +5982,17 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
   if (st.owner && playerState[st.owner] && st.owner === picks[currentPlayerIdx] && !(forceReloc && picks[currentPlayerIdx] === forceReloc) && !(aiBusy && pickOrder[currentPlayerIdx] && pickOrder[currentPlayerIdx].type === "computer")) { // AI 回合/挂起势力自身回合不显示操作按钮
     ensureBuildings();
     const ps = playerState[st.owner];
-    let cityCost = 20 + (isNomadFaction(st.owner) && st.owner !== "党项" ? 10 : 0) - (st.building === "市舶司" ? 10 : 0);
-    if (st.owner === "明" && isMingBuffCap() && province.name === (mutableCapital["明"] || CAPITAL_MAP["明"])) cityCost -= 5; // 天子守国门：首都建城-5
+    // buff: nomad_city_cost / liao_south_upgrade / ming_capital_battle —— 建城 +10、南面官升级 −5、明首都 −5
+    let cityCost = 20
+      + buffSum(st.owner, "build.cityCost", { prov: province, city: st.city }, 0)
+      + buffSum(st.owner, "build.upgradeCost", { prov: province, city: st.city }, 0)
+      + buffCapitalBuildDelta(st.owner, province) - (st.building === "市舶司" ? 10 : 0);
     if (st.building === "行宫" && st.city === 0) cityCost -= 20; // 陪都：仅白地新建-20（与 buildCity 一致）
     const cityDevBase = (st && st.dev ? st.dev : (province.dev || 0)); // 与 provIncome 一致：dev 为 0 时取地块默认
     const cInc = Math.round((cityDevBase * 2 * incomeScale() + (st.building === "运河" ? 1 : 0)) * 100) / 100; // 预期增收：升一级城市 +2×发展度（运河再+1），×收入倍率
-    if (isLiao(st.owner) && liaoNorth === false && st.city >= 1) cityCost -= 5; // 南面官：仅升级
     if (cityCost < 0) cityCost = 0; // 价格不为负
-    const nomadNoUp = isNomadFaction(st.owner) && st.owner !== "党项" && st.city >= 1; // 游牧未建立王朝：隐藏升级按钮
+    // buff: nomad_no_upgrade —— 游牧三家未建立王朝：隐藏升级按钮（党项没有这一条）
+    const nomadNoUp = st.city >= 1 && buffAny(st.owner, "build.cityForbidden", { what: "upgrade", prov: province });
     const cityOk = st.city < 4 && ps.treasury >= cityCost && !nomadNoUp;
     const cityWhy = st.city >= 4 ? "已满级" : (ps.treasury < cityCost ? "国库不足" : "");
     let bh = "";
@@ -5543,13 +6024,17 @@ function showProvinceInfo(province) { if (replayMode) return; // 读史：点击
         bh += "<button class='rbtn" + (bOk ? "" : " off") + "' onclick='buildBuilding(" + province.id + ")'>" + "<span class='bn'>[3] 建造" + bdef.name + (bWhy ? "<em class='w'>" + bWhy + "</em>" : "") + "</span><span class='bp'>" + bInc + bdef.cost + " 钱</span></button>";
       }
     }
-    if (gamePhase === "build" && picks[currentPlayerIdx] === st.owner && isNomadFaction(st.owner) && st.owner !== "党项" && province.name !== (mutableCapital[st.owner] || CAPITAL_MAP[st.owner]) && !nomadMoved[st.owner]) {
-      const nOk = gamePhase === "build" && ps.treasury >= 5;
-      bh += "<button class='rbtn" + (nOk ? "" : " off") + "' onclick='nomadMoveCapital(" + province.id + ")'>" + "<span class='bn'>[4] 迁都" + (nOk ? "" : "<em class='w'>" + (gamePhase !== "build" ? "仅建造阶段" : "钱不足") + "</em>") + "</span><span class='bp'>5 钱</span></button>";
+    const nRule = gamePhase === "build" && picks[currentPlayerIdx] === st.owner ? buffRelocateRule(st.owner) : null; // buff: action.relocate
+    if (nRule && province.name !== (mutableCapital[st.owner] || CAPITAL_MAP[st.owner]) && !nomadMoved[st.owner]) {
+      const nOk = gamePhase === "build" && ps.treasury >= nRule.cost;
+      bh += "<button class='rbtn" + (nOk ? "" : " off") + "' onclick='nomadMoveCapital(" + province.id + ")'>" + "<span class='bn'>[4] 迁都" + (nOk ? "" : "<em class='w'>" + (gamePhase !== "build" ? "仅建造阶段" : "钱不足") + "</em>") + "</span><span class='bp'>" + nRule.cost + " 钱</span></button>";
     }
-    if (gamePhase === "build" && picks[currentPlayerIdx] === "明" && MING_CAPITALS.indexOf(province.name) >= 0) {
-      const mingCapNow = mutableCapital["明"] || CAPITAL_MAP["明"];
-      if (st.owner === "明" && !mingMovedTo[province.name] && province.name !== mingCapNow) {
+    // buff: action.relocate —— 多目标各限一次的迁都（明：江南/燕云/广东）
+    const mvRule = buffRelocateRule(st.owner);
+    const mvTargets = mvRule && mvRule.oncePerTarget ? (mvRule.targets || []) : [];
+    if (gamePhase === "build" && picks[currentPlayerIdx] === st.owner && mvTargets.indexOf(province.name) >= 0) {
+      const mingCapNow = mutableCapital[st.owner] || CAPITAL_MAP[st.owner];
+      if (st.owner === picks[currentPlayerIdx] && !mingMovedTo[province.name] && province.name !== mingCapNow) {
         const phaseDone = mingCapMovedTurn === currentTurn; // 每建造阶段限迁都一次（mingMoveCapital 内校验，此处同步按钮状态）
         bh += "<button class='rbtn" + (!phaseDone ? "" : " off") + "' onclick='mingMoveCapital(" + province.id + ")'>" + "<span class='bn'>[4] 迁都至此" + (phaseDone ? "<em class='w'>本阶段已迁都</em>" : "") + "</span></button>";
       }
@@ -5687,11 +6172,10 @@ function applySetup(stp) {
       mutableCapital[f] = stp.capitals[f];
     }
     if (stp.moved && stp.moved[f]) {
-      if (f === "明") {
-        // 四省各自一次机会
-        if (Array.isArray(stp.moved[f])) stp.moved[f].forEach(function(n) { mingMovedTo[n] = true; });
-        else mingMovedTo[mutableCapital[f] || CAPITAL_MAP[f]] = true;
-      } else nomadMoved[f] = true;
+      // buff: action.relocate —— 数组 = 多目标各限一次（明），true = 全局限一次（游牧）
+      if (Array.isArray(stp.moved[f])) stp.moved[f].forEach(function(n) { mingMovedTo[n] = true; });
+      else if ((buffRelocateRule(f) || {}).oncePerTarget) mingMovedTo[mutableCapital[f] || CAPITAL_MAP[f]] = true;
+      else nomadMoved[f] = true;
     }
   }
   // 首都城市等级（在首都地块上）
@@ -5755,20 +6239,8 @@ function applySetup(stp) {
 }
 function applyStartup() {
   initDebuffs();
-  // 剧本开局关系（辽=契丹；金/清=女真）
-  if (scenarioId === "chenqiao") {
-    relation[relKey("契丹", "汉")] = 100; relation[relKey("宋", "唐")] = 0;
-  } else if (scenarioId === "haishang") {
-    relation[relKey("契丹", "蒙古")] = 100; relation[relKey("契丹", "女真")] = 0;
-    relation[relKey("宋", "女真")] = 100; // 海上之盟：宋-金满好感
-    relation[relKey("党项", "契丹")] = 75; relation[relKey("党项", "宋")] = 75; // 夏-辽、夏-宋 75
-  } else if (scenarioId === "yidai") {
-    relation[relKey("宋", "女真")] = 0; relation[relKey("蒙古", "女真")] = 0;
-    relation[relKey("宋", "蒙古")] = 100; // 一代天骄：宋-蒙古满好感
-    relation[relKey("党项", "女真")] = 75; relation[relKey("党项", "契丹")] = 75; relation[relKey("党项", "宋")] = 75; // 夏-金、夏-辽、夏-宋 75
-  } else if (scenarioId === "jiashen") {
-    relation[relKey("顺", "明")] = 0; relation[relKey("明", "女真")] = 0;
-  }
+  // 剧本开局关系（辽=契丹；金/清=女真）：数据见 src/data/scenario-events.json
+  for (const rel of scnStartRelations()) relation[relKey(rel[0], rel[1])] = rel[2]; // buff: scn-startup-relations
   const stp = SCENARIOS[scenarioId].setup;
   for (var i=0;i<pickOrder.length;i++){
     var f=picks[i]; if(!f) continue;
@@ -6393,25 +6865,20 @@ function unitMovePts(name, kind) {
 }
 function makeUnit(kind, name, x, y, owner) {
   const u = { uid: unitUid++, kind, name, x, y, atk: 1 };
-  // 特性词条：游牧/辽北面官/蒙古和平 → 骑兵获得「远射」
+  // 特性词条：只查 buffs.json 的 unit.keywords，谁拿哪条全写在数据里
+  // buff: han_kaituo / nomad_cav_yuanshe(_nv/_mg) / nomad_cav_lueduo(_nv/_mg) / dangxiang_cav_yuanshe / yuan_yizhan / yuan_cav_yuanshe / liao_north_cav_yuanshe
   const isCavK = kind === "cav" || (kind === "spec" && SPEC_TYPE[name] === "cav");
-  if (isCavK && (isNomadFaction(owner) || (isLiao(owner) && liaoNorth === true) || (owner === "蒙古" && evolved["蒙古"]))) {
-    u.props = ["远射"];
+  const grants = [];
+  for (const r of buffCollect(owner, "unit.keywords", { isCav: isCavK, unit: u })) {
+    for (const it of (Array.isArray(r) ? r : [r])) {
+      if (it && it.op === "add") grants.push(it);
+    }
   }
-  // 劫掠：只有契丹、女真、蒙古的游牧骑兵拥有（定难节度没有）
-  if (isCavK && isNomadFaction(owner) && owner !== "党项") {
-    const raidList = u.props || (u.props = []);
-    if (raidList.indexOf("劫掠") < 0) raidList.push("劫掠");
-  }
-  // 蒙古和平：全体军队获得「驿站」（允许额外调动一次）
-  if (owner === "蒙古" && evolved["蒙古"]) {
-    const list = u.props || (u.props = []);
-    if (list.indexOf("驿站") < 0) list.push("驿站");
-  }
-  // 汉朝特性：全体军队获得「开拓」（对中立单位战力+1）
-  if (owner === "汉") {
-    const list = u.props || (u.props = []);
-    if (list.indexOf("开拓") < 0) list.push("开拓");
+  if (grants.length) {
+    // seq 复刻旧 if 链的授予顺序：远射(10) → 劫掠(20) → 驿站(30) → 开拓(40)
+    grants.sort(function (a, b) { return (a.seq || 0) - (b.seq || 0); });
+    u.props = [];
+    for (const g of grants) if (u.props.indexOf(g.kw) < 0) u.props.push(g.kw);
   }
   u.moves = unitMovePts(name, kind) + (hasKeyword(u, "驿站") ? moveCost(u) : 0); // 驿站：额外调动一次（给等同移动消耗的调动点）
   return u;
@@ -6426,18 +6893,18 @@ function isCavUnit(u) {
 function syncFactionKeywords(s) {
   if (!s || !s.units) return;
   for (const u of s.units) {
-    const list = u.props || (u.props = []);
-    if (s.owner === "汉") {
-      if (list.indexOf("开拓") < 0) list.push("开拓");
-    } else if (s.owner === "蒙古" && evolved["蒙古"]) {
-      if (list.indexOf("驿站") < 0) list.push("驿站");
-      if (isCavUnit(u) && list.indexOf("远射") < 0) list.push("远射");
-    } else if (isNomadFaction(s.owner)) {
-      if (isCavUnit(u) && list.indexOf("远射") < 0) list.push("远射");
-      if (s.owner !== "党项" && isCavUnit(u) && list.indexOf("劫掠") < 0) list.push("劫掠"); // 游牧骑兵：进攻战力+1
-      if (s.owner === "党项" && list.indexOf("劫掠") >= 0) u.props = list.filter(function (k) { return k !== "劫掠"; });
-    } else if (isLiao(s.owner) && liaoNorth === true) {
-      if (isCavUnit(u) && list.indexOf("远射") < 0) list.push("远射");
+    let list = u.props || (u.props = []);
+    // 每回合按数据补齐/清掉势力特性词条（原先按 s.owner 硬判的 else-if 链已搬走）
+    // buff: 同 makeUnit；党项另有 dangxiang_no_lueduo 负责清「劫掠」（含叛逃带进来的）
+    for (const r of buffCollect(s.owner, "unit.keywords", { isCav: isCavUnit(u), unit: u })) {
+      for (const it of (Array.isArray(r) ? r : [r])) {
+        if (!it || !it.kw) continue;
+        if (it.op === "remove") {
+          if (list.indexOf(it.kw) >= 0) list = u.props = list.filter(function (k) { return k !== it.kw; });
+        } else if (list.indexOf(it.kw) < 0) {
+          list.push(it.kw);
+        }
+      }
     }
   }
 }
@@ -7669,9 +8136,19 @@ function calcBattleMods(atkUnit, defUnit, src, dst, tgt, atkProv) {
   if (enclaveOn && isEnclave(atkProv.id, src.owner)) R.atk.list.push({ t: "飞地", v: -1 });
   if (enclaveOn && dst.owner && isEnclave(tgt.id, dst.owner)) R.def.list.push({ t: "飞地", v: -1 });
   // 天子守国门：明首都 +1（仅首都为江南/燕云/广东时）
+  // buff: ming_capital_battle —— +1 与 targets 判定都走 params；
+  // 缺条目时退回旧硬编码（isMingBuffCap + 1），行为不变。
   const mingCap = mutableCapital["明"] || CAPITAL_MAP["明"];
-  if (isMingBuffCap() && src.owner === "明" && atkProv.name === mingCap) R.atk.list.push({ t: "首都", v: 1 });
-  if (isMingBuffCap() && dst.owner === "明" && tgt.name === mingCap) R.def.list.push({ t: "首都", v: 1 });
+  if (src.owner === "明") {
+    const b = buffFirst("明", "battle.capitalMod", { prov: atkProv }, undefined);
+    const v = (b && typeof b.v === "number") ? b.v : ((isMingBuffCap() && atkProv.name === mingCap) ? 1 : 0);
+    if (v > 0) R.atk.list.push({ t: "首都", v: v });
+  }
+  if (dst.owner === "明") {
+    const b = buffFirst("明", "battle.capitalMod", { prov: tgt }, undefined);
+    const v = (b && typeof b.v === "number") ? b.v : ((isMingBuffCap() && tgt.name === mingCap) ? 1 : 0);
+    if (v > 0) R.def.list.push({ t: "首都", v: v });
+  }
   // 武备废弛：军队战力 -1（攻防都算，任意持有势力）；名称跟随剧本/势力（缺饷/腐化/偏安/废弛）
   if (debuffState[src.owner] && debuffState[src.owner].wubei) R.atk.list.push({ t: wubeiName(src.owner), v: -1 });
   if (debuffState[dst.owner] && debuffState[dst.owner].wubei) R.def.list.push({ t: wubeiName(dst.owner), v: -1 });
@@ -7709,12 +8186,12 @@ function doBattle() {
 
   const advAtk = hasTroopAdvantage(src.owner, atkF.prov.id, b.defPid); // 兵力优势：每次战斗前实时判定
   // 兵力优势掷两次取高：史官记录「大/小」两个原始骰子，方便复盘
-  const _rollA = 1 + Math.floor(Math.random()*6);
-  const _rollB = advAtk ? 1 + Math.floor(Math.random()*6) : 0;
+  const _rollA = 1 + Math.floor(rand() * 6);
+  const _rollB = advAtk ? 1 + Math.floor(rand() * 6) : 0;
   const d1 = advAtk ? Math.max(_rollA, _rollB) : _rollA;
   const d1txt = advAtk ? d1 + "/" + Math.min(_rollA, _rollB) : null;
   b.d1txt = d1txt; // 传给 resolveBattle（超时回调不在 doBattle 作用域内）
-  const d2 = 1 + Math.floor(Math.random()*6);
+  const d2 = 1 + Math.floor(rand() * 6);
   const atkKey2 = atkF.prov.id + ">" + b.defPid + ">" + (src.owner || "");
   if (lastAtkKey !== atkKey2) { // 联合进攻总览行已写则跳过（连续同源同目标只写一次进攻行）
     const defTxt2 = describeArmyOf(dst);
@@ -7965,7 +8442,8 @@ const TERRAIN_COLORS = {
 function provIncome(p, s) {
   let inc = (s && s.dev ? s.dev : (p.dev || 0)) * 2 * ((s ? s.city : 0) + 1); // 新版：1 点发展度 = 2 钱 ×（城市等级 + 1）
   if (s && s.owner) {
-    if (s.owner === "秦" && s.units.length > 0) inc += 2;
+    // buff: qin_garrison_income —— 与 calcIncomeRaw 同源，避免着色和实际收入对不上
+    inc += buffSum(s.owner, "income.provBonus", { prov: p, state: s }, 0);
     if (s.building === "运河") inc += 3 + (s.city || 0);
   }
   return inc;
@@ -8360,21 +8838,24 @@ function buildEvoTable() {
   let fh = "";
   for (const f of ORDER) {
     const evos = EVO_OPTIONS[f] || null;
-    const canMove = f === "明" || f === "契丹" || f === "女真" || f === "蒙古";
+    const canMove = !!buffRelocateRule(f); // buff: action.relocate
     const capList = landP.filter(function(p) { const pc = edData.provinces[p.name]; return pc && pc.owner === f; }).map(function(p) { return p.name; }); // 首都只能选该势力控制的地块
     const capSel = "<option value=''>默认</option>" + capList.map(function(pn) { return "<option value='" + pn + "'" + (edData.capitals[f] === pn ? " selected" : "") + ">" + pn + "</option>"; }).join("");
     const evoOpts = evos ? evos.map(function(e) { return "<option value='" + e[0] + "'" + (edData.evolved[f] === e[0] ? " selected" : "") + ">" + e[1] + "</option>"; }).join("") : "";
     // 明：四省各自一次迁都机会（各自勾选）
-    const mingMoved = Array.isArray(edData.moved["明"]) ? edData.moved["明"] : [];
-    const mmSel = MING_CAPITALS.map(function(pn) {
-      return pn + "<input type='checkbox' id='ed-mm-" + pn + "'" + (mingMoved.indexOf(pn) >= 0 ? " checked" : "") + " onchange='edFactionChange()' style='width:14px;height:14px;margin:0 4px 0 6px'>";
+    // buff: action.relocate —— 有 oncePerTarget 规则就出「多目标各一次」勾选框
+    const mvRule = buffRelocateRule(f);
+    const mvTargets = mvRule && mvRule.oncePerTarget ? (mvRule.targets || []) : [];
+    const mvDone = Array.isArray(edData.moved[f]) ? edData.moved[f] : [];
+    const mmSel = mvTargets.map(function(pn) {
+      return pn + "<input type='checkbox' id='ed-mm-" + pn + "'" + (mvDone.indexOf(pn) >= 0 ? " checked" : "") + " onchange='edFactionChange()' style='width:14px;height:14px;margin:0 4px 0 6px'>";
     }).join("");
     fh += "<div class='ed-row'><span class='ed-l'>" + f + "</span>" +
       "钱<input id='ed-money-" + f + "' type='number' min='0' value='" + (edData.money[f] !== undefined ? edData.money[f] : 10) + "' onchange='edFactionChange()'>" +
       "首都<select id='ed-cap-" + f + "' onchange='edFactionChange()'><option value=''>默认</option>" + capSel + "</select>" +
       "首都等级<input id='ed-capLv-" + f + "' type='number' min='1' max='4' value='" + (edData.capLv[f] || 1) + "' onchange='edFactionChange()'>" +
-      (canMove && f !== "明" ? "迁都过<input id='ed-moved-" + f + "' type='checkbox'" + (edData.moved[f] ? " checked" : "") + " onchange='edFactionChange()'>" : "") +
-      (f === "明" ? "<span style='font-size:12px'>迁都:" + mmSel + "</span>" : "") +
+      (canMove && !mvTargets.length ? "迁都过<input id='ed-moved-" + f + "' type='checkbox'" + (edData.moved[f] ? " checked" : "") + " onchange='edFactionChange()'>" : "") +
+      (mvTargets.length ? "<span style='font-size:12px'>迁都:" + mmSel + "</span>" : "") +
       (evos ? "王朝<select id='ed-evo-" + f + "' onchange='edFactionChange()'>" + evoOpts + "</select>" : "") + "</div>";
   }
   document.getElementById("ed-factions").innerHTML = fh;
@@ -8467,7 +8948,7 @@ function edRenderAll() {
 function factionColorOf(f) {
   // 与游戏一致：只有明主动迁都换色，其他势力用默认首都色
   let cap = CAPITAL_MAP[f];
-  if (f === "明") { const mc = mutableCapital["明"] || CAPITAL_MAP["明"]; cap = mingColorCap || ((mc === "燕云" || mc === "广东") ? mc : CAPITAL_MAP["明"]); }
+  cap = factionDisplayCapital(f) || cap; // 明迁都换色的统一入口
   const p = provByName(cap);
   if (p && p.rgb) return "rgb(" + p.rgb[0] + "," + p.rgb[1] + "," + p.rgb[2] + ")";
   return "#ffd700";
@@ -8566,17 +9047,17 @@ function edFactionChange() {
     else delete edData.capitals[f];
     const capLv = parseInt(document.getElementById("ed-capLv-" + f).value);
     if (!isNaN(capLv)) edData.capLv[f] = capLv;
-    const canMove = f === "明" || f === "契丹" || f === "女真" || f === "蒙古";
+    const canMove = !!buffRelocateRule(f); // buff: action.relocate
     if (canMove) {
-      if (f === "明") {
-        // 明：四省各自勾选（各限一次）
+      if (mvTargets.length) {
+        // 多目标各限一次（明：江南/燕云/广东）
         const arr = [];
-        for (const pn of MING_CAPITALS) {
+        for (const pn of mvTargets) {
           const el = document.getElementById("ed-mm-" + pn);
           if (el && el.checked) arr.push(pn);
         }
-        if (arr.length) edData.moved["明"] = arr;
-        else delete edData.moved["明"];
+        if (arr.length) edData.moved[f] = arr;
+        else delete edData.moved[f];
       } else {
         if (document.getElementById("ed-moved-" + f).checked) edData.moved[f] = true;
         else delete edData.moved[f];
@@ -8928,7 +9409,7 @@ function resolveRandomPicks(){
     if(picks[i]!=="随机")continue;
     var list=Array.from(avail);
     if(list.length===0)break;
-    var n=list[Math.floor(Math.random()*list.length)];
+    var n=list[Math.floor(rand()*list.length)];
     picks[i]=n;avail.delete(n);
     var seat=pickOrder[i]?pickOrder[i].name:"玩家"+(i+1);
     chronicleAdd("🎲 " + seat + " 随机揭晓：" + C[n].icon + " " + n + "！");
