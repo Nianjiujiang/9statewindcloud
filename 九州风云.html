@@ -2930,19 +2930,21 @@ function evolveFaction(f, branch) {
   chronicleAdd(displayName(f) + " 成立王朝");
   if (f === "契丹") {
     liaoNorth = null; liaoPhase = -1; // 成辽后需重新选
-    // 游牧特性消失：移除现有契丹骑兵的「远射」（北面官选择时再加）
+    // 游牧特性消失：移除现有契丹骑兵的「远射」「劫掠」（北面官选择时再加）
     for (const p of DATA) {
       const s = provState[p.id];
       if (!s || s.owner !== "契丹") continue;
       for (const u of s.units) {
         if (!u.props) continue;
-        const i = u.props.indexOf("远射");
-        if (i >= 0) u.props.splice(i, 1);
+        for (const kw of ["远射", "劫掠"]) {
+          const i = u.props.indexOf(kw);
+          if (i >= 0) u.props.splice(i, 1);
+        }
       }
     }
   }
   if (f === "女真" || f === "党项") {
-    // 失去游牧/定难节度：移除现有骑兵的「远射」（蒙古→元仍保留，元特性会给远射）
+    // 失去游牧/定难节度：移除现有骑兵的「远射」「劫掠」（蒙古→元仍保留，元特性会给远射）
     for (const p of DATA) {
       const s = provState[p.id];
       if (!s || s.owner !== f) continue;
@@ -2950,18 +2952,22 @@ function evolveFaction(f, branch) {
         if (!u.props) continue;
         const isCavK = u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav");
         if (!isCavK) continue;
-        const i = u.props.indexOf("远射");
-        if (i >= 0) u.props.splice(i, 1);
+        for (const kw of ["远射", "劫掠"]) {
+          const i = u.props.indexOf(kw);
+          if (i >= 0) u.props.splice(i, 1);
+        }
       }
     }
   }
   if (f === "蒙古") {
-    // 蒙古和平：现有蒙古军队获得「驿站」「远射」：词条
+    // 蒙古和平：游牧特性消失，移除骑兵「劫掠」；现有军队获得「驿站」和「远射」
     for (const p of DATA) {
       const s = provState[p.id];
       if (!s || s.owner !== "蒙古") continue;
       for (const u of s.units) {
         const list = u.props || (u.props = []);
+        const ri = list.indexOf("劫掠");
+        if (ri >= 0) list.splice(ri, 1);
         if (list.indexOf("驿站") < 0) list.push("驿站");
         const isCavK = u.kind === "cav" || (u.kind === "spec" && SPEC_TYPE[u.name] === "cav");
         if (isCavK && list.indexOf("远射") < 0) list.push("远射");
