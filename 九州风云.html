@@ -485,6 +485,19 @@ html, body { height:100%; overscroll-behavior:none; }
 
 
 
+
+/* ===== 加入新玩家（23-addplayer.js） ===== */
+#addplayer-modal { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:920; background:rgba(20,14,8,.97); border:2px solid rgba(255,215,0,.45); border-radius:12px; padding:14px 18px; width:min(760px,94vw); max-height:86vh; display:flex; flex-direction:column; box-sizing:border-box; }
+#addplayer-modal h3 { color:#ffd700; margin:0 0 8px; letter-spacing:3px; text-align:center; }
+#addplayer-modal .ap-tip { font-size:13px; color:#b8a888; line-height:1.6; margin-bottom:8px; }
+#addplayer-list { overflow:auto; flex:1; min-height:80px; padding-right:4px; }
+#addplayer-modal .ap-region { color:#e9d9a6; font-size:13px; letter-spacing:2px; margin:8px 0 4px; opacity:.8; }
+#addplayer-modal .ap-row { display:flex; align-items:center; gap:10px; padding:3px 2px; border-bottom:1px dotted rgba(233,217,166,.12); }
+#addplayer-modal .ap-prov { color:#ffe9b0; font-size:15px; min-width:88px; }
+#addplayer-modal .ap-civ { color:#cfc3a0; font-size:13px; flex:1; }
+#addplayer-modal .ap-btns { display:flex; gap:6px; }
+#addplayer-modal .ap-btns .sbtn { width:auto; padding:5px 12px; font-size:13px; }
+#addplayer-modal .ap-empty { color:#b8a888; padding:10px 2px; }
 </style>
 
 </head>
@@ -632,7 +645,14 @@ html, body { height:100%; overscroll-behavior:none; }
     <button class="sbtn" onclick="openChronicle()">📜 史官</button>
     <button class="sbtn" onclick="saveGame()">💾 存档</button>
     <button class="sbtn" onclick="loadGame()">📂 读档</button>
+    <button class="sbtn" onclick="openAddPlayer()">➕ 新玩家</button>
     <input type="file" id="load-file" accept=".json" style="display:none" onchange="importSaveFile(this)">
+  </div>
+  <div id="addplayer-modal" class="hidden">
+    <h3>➕ 加入新玩家</h3>
+    <div class="ap-tip">选一个不是任何势力首都的地块，该地块会成为新玩家的首都；开局资金 = 10 + 回合数×3（上限 100）。</div>
+    <div id="addplayer-list"></div>
+    <div class="cm-btns"><button class="sbtn" style="width:auto;padding:8px 16px" onclick="closeAddPlayer()">关闭</button></div>
   </div>
   <div id="ai-modal" class="hidden" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:600;background:rgba(20,14,8,.98);border:2px solid rgba(255,215,0,.5);border-radius:12px;padding:16px 20px;width:min(780px,94vw);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">
     <h3 style="color:#ffd700;margin:0 0 8px;letter-spacing:3px;text-align:center;font-size:18px;">📋 决策</h3>
@@ -4185,6 +4205,7 @@ function buildSaveData() {
     }
     const data = {
       version: 2, // 规则版本：发展度改为 0–10 后，旧存档不再兼容
+      customCivs: (typeof customCivsForSave === "function" ? customCivsForSave() : []), // 中途加入的白板文明（名字 + 首都） // 规则版本：发展度改为 0–10 后，旧存档不再兼容
       pickOrder: pickOrder, picks: picks,
       scenarioId: scenarioId, seatTypes: seatTypes,
       currentTurn: currentTurn, gamePhase: gamePhase, currentPlayerIdx: currentPlayerIdx,
@@ -4242,6 +4263,14 @@ function importSaveFile(input) {
 }
 function applyLoadedSave(d) {
   if (!d || d.version !== 2) throw new Error("旧版存档不兼容（发展度规则已改为 0–10），请开新局");
+  // 中途加入的白板文明：先注册回 C / CAPITAL_MAP，否则下面的 playerState 白名单会把它们丢掉
+  if (typeof registerCustomCiv === "function") {
+    const extra = Array.isArray(d.customCivs) ? d.customCivs : [];
+    for (const cv of extra) if (cv && cv.name) registerCustomCiv(cv.name, cv.capital || "");
+    for (const k in (d.playerState || {})) {
+      if (!C[k] && newCivProvByName(k)) registerCustomCiv(k, (d.mutableCapital && d.mutableCapital[k]) || "");
+    }
+  }
   try {
     pickOrder = d.pickOrder; picks = d.picks;
     scenarioId = d.scenarioId || "sandbox"; seatTypes = d.seatTypes || []; // 恢复剧本 + 座位类型（人类/电脑），刷新后读档不丢失
@@ -10572,6 +10601,7 @@ function buildChronicleText() {
   out.push("座位：" + histSeatRows(histBase));
   out.push("");
   let snap = histClone(histBase);
+  let lastSeatSig = histSeatSig(histBase);
   let curTurnNo = null, curPhase = null, pendingPhase = null, settledEntry = null, preludeStart = -1;
   for (let i = 0; i < histEntries.length; i++) {
     const e = histEntries[i];
@@ -10589,6 +10619,8 @@ function buildChronicleText() {
         preludeStart = i;
       }
       out.push("═══════ 第 " + curTurnNo + " 回合 ═══════");
+      const seatSig = histSeatSig(snap);
+      if (seatSig !== lastSeatSig) { lastSeatSig = seatSig; out.push("【座位】"); out.push("　" + histSeatRows(snap)); }
       out.push("【开局】");
       for (const r of histFactionRows(snap)) {
         const capNm = (snap.g.mutableCapital && snap.g.mutableCapital[r.f]) ? snap.g.mutableCapital[r.f] : (typeof CAPITAL_MAP !== "undefined" ? CAPITAL_MAP[r.f] : "");
@@ -10613,6 +10645,16 @@ function buildChronicleText() {
 }
 
 
+// 座位签名：座位数量/名字/类型变化时，文本里要重新写一次【座位】
+function histSeatSig(snap) {
+  const picks = (snap.g && snap.g.picks) || {};
+  const types = (snap.g && snap.g.seatTypes) || [];
+  const po = (snap.g && snap.g.pickOrder) || [];
+  const arr = [];
+  for (const k in picks) arr.push(k + ":" + (picks[k] || "") + ":" + (types[k] || "") + ":" + ((po[k] && po[k].name) || ""));
+  return arr.join("|");
+}
+
 // 回合开局的座位（谁是人类/电脑），用于从文本还原
 function histSeatRows(snap) {
   const parts = [];
@@ -10623,13 +10665,16 @@ function histSeatRows(snap) {
     if (!f) continue;
     const po = (snap.g && snap.g.pickOrder) || [];
     const nm = (po[k] && po[k].name) ? po[k].name : ("玩家" + (Number(k) + 1));
-    parts.push((typeof displayName === "function" ? displayName(f) : f) + "（" + nm + "·" + (types[k] === "human" ? "人类" : "电脑") + "）");
+    const typ = types[k] === "human" ? "人类" : "电脑";
+    // 座位名本身可能已带「：人类/：电脑」，避免出现「玩家1：人类·人类」
+    const tail = /(人类|电脑)$/.test(nm) ? "" : ("·" + typ);
+    parts.push((typeof displayName === "function" ? displayName(f) : f) + "（" + nm + tail + "）");
   }
   return parts.length ? parts.join("、") : "—";
 }
 
 function histParseSeat(s) {
-  let q = s.match(/^(.+?)（(.+?)·(人类|电脑)）$/);
+  let q = s.match(/^(.+?)（(.+?)[·：](人类|电脑)）$/);
   if (q) return { faction: q[1], name: q[2], human: q[3] === "人类" };
   q = s.match(/^(.+?)（(人类|电脑)）$/);
   return q ? { faction: q[1], name: "", human: q[2] === "人类" } : null;
@@ -10645,9 +10690,9 @@ function histParseChronicle(raw) {
     let m;
     if ((m = ln.match(/^剧本：(.+?)　规则版本：2/))) { out.scenario = m[1].trim(); continue; }
     if ((m = ln.match(/^模式：(.+?)　桌游：(是|否)　收入倍率：([\d.]+)/))) { out.sandbox = m[1] === "沙盒"; out.board = m[2] === "是"; out.mult = Number(m[3]) || 1; continue; }
-    // 座位行（无「座位：」前缀），形如「宋（玩家1·人类）、契丹（玩家2·电脑）」
-    if (/^　.*（[^（）]*·(人类|电脑)）/.test(ln) || /^　.*（(人类|电脑)）/.test(ln)) {
-      out.seats = ln.replace(/^　/, "").split("、").map(histParseSeat).filter(Boolean);
+    // 回合内的座位行（旧格式没有【座位】段，直接一行），只挂到当前回合，不污染全局座位
+    if (cur && /^　.+[（(].+[·：](人类|电脑)[）)]/.test(ln)) {
+      cur.seats = ln.replace(/^　/, "").split("、").map(histParseSeat).filter(Boolean);
       continue;
     }
     if ((m = ln.match(/^座位：(.*)$/))) {
@@ -10660,6 +10705,7 @@ function histParseChronicle(raw) {
     if (/^【地块】/.test(ln)) { cur.sec = "prov"; continue; }
     if (/^【外交】/.test(ln)) { cur.sec = "diplo"; continue; }
     if (/^【座位】/.test(ln)) { cur.sec = "seat"; continue; }
+    if (cur.sec === "seat") { cur.seats = ln.replace(/^　/, "").split("、").map(histParseSeat).filter(Boolean); cur.sec = null; continue; }
     if (/^【(建造|行动)】/.test(ln)) { cur.sec = "act"; continue; }
     if (cur.sec === "fac") {
       m = ln.match(/^　[　 ]*(\S+)　国库 (-?[\d.]+)　占地 (\d+)　城市 (\d+) 级　兵力 (\d+)　发展度 (\d+)　首都 (\S+?)(　外交 (.+?))?(　（已灭亡）)?$/);
@@ -10732,7 +10778,7 @@ function buildSaveFromChronicle(raw, turnNo) {
     const hit = p.turns.filter(function(t) { return t.turn === turnNo; })[0];
     if (hit) blk = hit;
   }
-  const seats = (p.seats && p.seats.length) ? p.seats : blk.fac.map(function(f) { return { faction: f.name, human: false }; });
+  const seats = (blk.seats && blk.seats.length) ? blk.seats : ((p.seats && p.seats.length) ? p.seats : blk.fac.map(function(f) { return { faction: f.name, human: false }; }));
   const pickOrder = [], picks = {}, seatTypes = [];
   seats.forEach(function(s, i) {
     const f = histFactionByName(s.faction);
@@ -10875,6 +10921,127 @@ function histRelRep(name) {
   if (name === "不安") return 22;
   if (name === "愤怒") return 7;
   return 50;
+}
+// ===== 对局中途加入新玩家 =====
+// 数据：src/data/new-civs.json（39 个非首都地块 → 文明名，用户提供）
+const NEW_CIVS = [{"name":"索伦","prov":"黑龙江","region":"东北 · 朝鲜半岛"},{"name":"海西女真","prov":"吉林","region":"东北 · 朝鲜半岛"},{"name":"渤海","prov":"辽宁","region":"东北 · 朝鲜半岛"},{"name":"东海女真","prov":"海参崴","region":"东北 · 朝鲜半岛"},{"name":"尼夫赫","prov":"库页","region":"东北 · 朝鲜半岛"},{"name":"野人女真","prov":"海兰泡","region":"东北 · 朝鲜半岛"},{"name":"室韦","prov":"鄂伦春","region":"东北 · 朝鲜半岛"},{"name":"高句丽","prov":"平安","region":"东北 · 朝鲜半岛"},{"name":"朝鲜","prov":"京畿","region":"东北 · 朝鲜半岛"},{"name":"新罗","prov":"庆尚","region":"东北 · 朝鲜半岛"},{"name":"科尔沁","prov":"漠南","region":"北方草原 · 中原"},{"name":"瓦剌","prov":"漠西","region":"北方草原 · 中原"},{"name":"喀尔喀","prov":"戈壁","region":"北方草原 · 中原"},{"name":"燕","prov":"燕云","region":"北方草原 · 中原"},{"name":"赵","prov":"河北","region":"北方草原 · 中原"},{"name":"齐","prov":"山东","region":"北方草原 · 中原"},{"name":"凉","prov":"河西","region":"北方草原 · 中原"},{"name":"哈密","prov":"吐鲁番","region":"北方草原 · 中原"},{"name":"回鹘","prov":"准噶尔","region":"北方草原 · 中原"},{"name":"葛逻禄","prov":"七河","region":"北方草原 · 中原"},{"name":"于阗","prov":"塔里木","region":"北方草原 · 中原"},{"name":"吐谷浑","prov":"青海","region":"北方草原 · 中原"},{"name":"吐蕃","prov":"卫藏","region":"西域 · 高原"},{"name":"古格","prov":"阿里","region":"西域 · 高原"},{"name":"康","prov":"康巴","region":"西域 · 高原"},{"name":"大理","prov":"云南","region":"西域 · 高原"},{"name":"黔","prov":"贵州","region":"西域 · 高原"},{"name":"蜀","prov":"川东","region":"西域 · 高原"},{"name":"西","prov":"湖北","region":"华中 · 华南"},{"name":"楚","prov":"湖南","region":"华中 · 华南"},{"name":"赣","prov":"江西","region":"华中 · 华南"},{"name":"闽","prov":"福建","region":"华中 · 华南"},{"name":"越","prov":"广东","region":"华中 · 华南"},{"name":"长生","prov":"广西","region":"华中 · 华南"},{"name":"黎","prov":"雷琼","region":"华中 · 华南"},{"name":"东京","prov":"北圻","region":"中南半岛"},{"name":"安南","prov":"中圻","region":"中南半岛"},{"name":"占婆","prov":"南圻","region":"中南半岛"},{"name":"东宁","prov":"琉球","region":"海岛"}];
+const BASE_CIV_NAMES = Object.keys(C).slice(); // 开局时数据里已有的 12 家，用于区分后加入的白板文明
+
+function newCivNameByProv(provName) {
+  for (const c of NEW_CIVS) if (c.prov === provName) return c.name;
+  return "";
+}
+function newCivProvByName(name) {
+  for (const c of NEW_CIVS) if (c.name === name) return c.prov;
+  return "";
+}
+// 存档用：本局中途加入的白板文明（名字 + 首都）
+function customCivsForSave() {
+  const out = [];
+  for (const f in playerState) {
+    if (BASE_CIV_NAMES.indexOf(f) >= 0) continue;
+    out.push({ name: f, capital: (mutableCapital[f] || CAPITAL_MAP[f] || "") });
+  }
+  return out;
+}
+// 读档 / 还原史料时：把白板文明重新注册回 C / CAPITAL_MAP（否则会被白名单过滤掉）
+function registerCustomCiv(name, capital) {
+  if (!name || C[name]) return;
+  C[name] = { name: name, icon: "⚪", props: [], trait: "无特性", quote: "白板文明", keywords: [], capital: capital || "" };
+  if (capital) CAPITAL_MAP[name] = capital;
+}
+
+// 可用地块：陆地、当前不是任何势力的首都、且该文明尚未入场
+function newPlayerRegions() {
+  const caps = {};
+  for (const f in mutableCapital) if (mutableCapital[f]) caps[mutableCapital[f]] = true;
+  for (const f in CAPITAL_MAP) if (CAPITAL_MAP[f]) caps[CAPITAL_MAP[f]] = true;
+  const out = [];
+  for (const c of NEW_CIVS) {
+    if (playerState[c.name]) continue; // 已经在局中
+    if (caps[c.prov]) continue; // 已是某势力首都
+    const p = DATA.find(function(x) { return x.name === c.prov; });
+    if (!p || !p.is_land) continue;
+    const s = provState[p.id];
+    out.push({ prov: c.prov, name: c.name, region: c.region, owner: (s && s.owner) || null });
+  }
+  return out;
+}
+
+// 加入新玩家：type = "human" | "computer"；开局资金 = min(100, 10 + 回合数×3)
+function addNewPlayer(provName, type) {
+  if (gameOverShown) { showToast("对局已结束，不能再加入玩家"); return false; }
+  const p = DATA.find(function(x) { return x.name === provName; });
+  if (!p || !p.is_land) { showToast("只能选陆地地块"); return false; }
+  const f = newCivNameByProv(provName);
+  if (!f) { showToast("这个地块没有对应的文明"); return false; }
+  if (playerState[f]) { showToast("「" + f + "」已经在局中"); return false; }
+  for (const k in mutableCapital) if (mutableCapital[k] === provName) { showToast("这里已经是「" + k + "」的首都"); return false; }
+  if (CAPITAL_MAP[f]) { showToast("「" + f + "」已经在局中"); return false; }
+
+  registerCustomCiv(f, provName);
+  mutableCapital[f] = provName;
+  eliminated[f] = false;
+
+  const money = Math.min(100, 10 + currentTurn * 3);
+  const seatName = "玩家" + (pickOrder.length + 1);
+  playerState[f] = { name: seatName, faction: f, treasury: money };
+  const idx = pickOrder.length;
+  pickOrder.push({ name: seatName, type: type });
+  picks[idx] = f;
+  seatTypes[idx] = type;
+
+  const s = provState[p.id];
+  if (s) {
+    s.owner = f;
+    s.city = Math.max(1, s.city || 0);
+    s.dev = Math.max(1, Number(s.dev) || 0);
+    s.building = "";
+    s.units = [];
+    const u = makeUnit("inf", "步兵", p.center[0], p.center[1], f);
+    s.units.push(u);
+  }
+
+  if (typeof historyCommit === "function") {
+    try { historyCommit(f + " 加入对局（" + provName + "，国库 " + money.toFixed(2) + "）", true); } catch (e) {}
+  }
+  if (typeof updatePlayersPanel === "function") updatePlayersPanel();
+  if (typeof updateTurnUI === "function") updateTurnUI();
+  if (typeof applyOwnerColors === "function") applyOwnerColors();
+  if (typeof updateProvLabels === "function") updateProvLabels();
+  if (typeof showProvinceInfo === "function") showProvinceInfo(p);
+  showToast("「" + f + "」加入对局：" + provName + "，国库 " + money.toFixed(2) + " 钱");
+  if (typeof checkEliminations === 'function') { try { checkEliminations(); } catch (e) {} }
+  if (typeof renderAddPlayerList === 'function') renderAddPlayerList();
+  return true;
+}
+
+// ---- 弹窗 ----
+function openAddPlayer() {
+  const m = document.getElementById("addplayer-modal");
+  if (!m) return;
+  renderAddPlayerList();
+  m.classList.remove("hidden");
+}
+function closeAddPlayer() {
+  const m = document.getElementById("addplayer-modal");
+  if (m) m.classList.add("hidden");
+}
+function renderAddPlayerList() {
+  const box = document.getElementById("addplayer-list");
+  if (!box) return;
+  const list = newPlayerRegions();
+  if (!list.length) { box.innerHTML = "<div class='ap-empty'>没有可用的地块了（所有非首都地块都已被占为首都）</div>"; return; }
+  let h = "";
+  let region = "";
+  for (const r of list) {
+    if (r.region !== region) { region = r.region; h += "<div class='ap-region'>" + escHtml(region) + "</div>"; }
+    h += "<div class='ap-row'><span class='ap-prov'>" + escHtml(r.name) + "</span>"
+      + "<span class='ap-civ'>" + escHtml(r.prov) + (r.owner ? "（现属 " + escHtml(r.owner) + "）" : "") + "</span>"
+      + "<span class='ap-btns'><button class='sbtn' onclick='addNewPlayer(\"" + escHtml(r.prov) + "\",\"human\")'>人类</button>"
+      + "<button class='sbtn' onclick='addNewPlayer(\"" + escHtml(r.prov) + "\",\"computer\")'>电脑</button></span></div>";
+  }
+  box.innerHTML = h;
 }
 </script>
 
