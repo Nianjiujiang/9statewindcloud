@@ -11011,7 +11011,7 @@ function addNewPlayer(provName, type) {
   eliminated[f] = false;
 
   const money = addPlayerMoney();
-  const seatName = "玩家" + (pickOrder.length + 1);
+  const seatName = "玩家" + (pickOrder.length + 1) + "：" + (type === "human" ? "人类" : "电脑");
   playerState[f] = { name: seatName, faction: f, treasury: money };
   const idx = pickOrder.length;
   pickOrder.push({ name: seatName, type: type });
