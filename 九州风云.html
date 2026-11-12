@@ -484,6 +484,7 @@ html, body { height:100%; overscroll-behavior:none; }
 .unit.sel-dim { opacity:.35; filter:grayscale(.6); } /* 框选：同地块未选中的兵暗色 */
 
 
+
 </style>
 
 </head>
@@ -619,8 +620,8 @@ html, body { height:100%; overscroll-behavior:none; }
   <div id="turn-banner"></div>
   <div id="evo-flash"></div>
   <div id="view-box" class="hidden ui-s">
-    <label class="vslider" title="兵牌模式：开 = 小兵图标 / 关 = 汇总计数（省算力，只能联合调动）">兵牌<input type="checkbox" id="unit-summary-toggle" checked onchange="toggleUnitSummary(this.checked)"><span class="trk"></span></label>
-    <button class="vbtn" id="auto-eco-btn" onclick="autoEconomy()" title="分析当前回本最快的一步并自动执行一次（提升发展度/建城/建筑）">自动经济</button>
+    <label class="vslider">兵牌<input type="checkbox" id="unit-summary-toggle" checked onchange="toggleUnitSummary(this.checked)"><span class="trk"></span></label>
+    <button class="vbtn" id="auto-eco-btn" onclick="autoEconomy()">自动经济</button>
     <button class="vbtn ac" data-v="political" onclick="setView('political')">政治视图</button>
     <button class="vbtn" data-v="dev" onclick="setView('dev')">发展视图</button>
     <button class="vbtn" data-v="income" onclick="setView('income')">收入视图</button>
@@ -682,18 +683,18 @@ html, body { height:100%; overscroll-behavior:none; }
   <div id="turn-timer" class="hidden ui-sc"></div>
   <div id="turn-label" class="hidden ui-sc">第 1 回合</div>
   <div id="btn-ai-row" style="position:fixed;bottom:24px;right:120px;display:none;gap:6px;z-index:400;align-items:center;">
-    <button class="sbtn" id="btn-ai-rulebook" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIRulebook()" title="导出一次即可的完整规则书">规则书</button>
-    <button class="sbtn" id="btn-ai-turn" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIPack()" title="导出当前回合状态">回合</button>
-    <button class="sbtn" id="btn-ai-decision" style="width:auto;padding:6px 8px;font-size:12px" onclick="openAIDecision()" title="粘贴 AI 返回的决策，生成人工执行清单">决策</button>
-    <button class="sbtn" id="btn-ai-diplomacy" style="width:auto;padding:6px 8px;font-size:12px" onclick="openDiplomacy()" title="回合开始导出外交情况，AI 选择发消息/回话，导入后史官自动记载">外交</button>
+    <button class="sbtn" id="btn-ai-rulebook" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIRulebook()">规则书</button>
+    <button class="sbtn" id="btn-ai-turn" style="width:auto;padding:6px 8px;font-size:12px" onclick="exportAIPack()">回合</button>
+    <button class="sbtn" id="btn-ai-decision" style="width:auto;padding:6px 8px;font-size:12px" onclick="openAIDecision()">决策</button>
+    <button class="sbtn" id="btn-ai-diplomacy" style="width:auto;padding:6px 8px;font-size:12px" onclick="openDiplomacy()">外交</button>
   </div>
 
   <div id="turn-box" class="hidden ui-s">
-    <button id="ai-btn" onclick="aiTakeOverPhase()" title="让电脑替你打完当前阶段，结束后自动交还">🤖 本阶段托管</button>
+    <button id="ai-btn" onclick="aiTakeOverPhase()">🤖 本阶段托管</button>
     <button id="turn-btn" onclick="turnClick()">⏳</button>
     <div id="turn-cap">结束建造</div>
   </div>
-  <div id="players" class="hidden ui-s"><div class="ph"><h4>◈ 玩家</h4><div id="ui-tools"><button id="speed-btn" class="utool" onclick="cycleSpeed()" title="动画速度：点击切换 ×1/×2/跳过">×1</button><button id="mute-btn" class="utool" onclick="toggleMute()" title="静音切换">🔊</button></div><button id="players-toggle" onclick="togglePlayers()">−</button></div><div id="players-body"><div id="goal-panel"></div><div id="players-list"></div><div id="evo-area"></div></div></div>
+  <div id="players" class="hidden ui-s"><div class="ph"><h4>◈ 玩家</h4><div id="ui-tools"><button id="speed-btn" class="utool" onclick="cycleSpeed()">×1</button><button id="mute-btn" class="utool" onclick="toggleMute()">🔊</button></div><button id="players-toggle" onclick="togglePlayers()">−</button></div><div id="players-body"><div id="goal-panel"></div><div id="players-list"></div><div id="evo-area"></div></div></div>
   <div id="players-tab" class="hidden" onclick="togglePlayers()">▶</div>
 <script>// ===== 运行环境 =====
 // 浏览器里 HZ_HEADLESS 恒为 false。
@@ -1409,9 +1410,9 @@ function aiTakeOverPhase() {
   tempAISeat = i;
   pickOrder[i].type = "computer";
   if (typeof seatTypes !== "undefined" && seatTypes) seatTypes[i] = "computer";
-  showTurnBanner("本阶段托管给电脑");
   updateTurnUI(); updatePlayersPanel();
-  try { historyCommit("玩家托管：本阶段交给电脑"); } catch (e) {}
+  // 史官记一笔：谁在哪个阶段被托管
+  try { historyCommit(f + " " + (gamePhase === "build" ? "建造阶段" : "行动阶段") + "托管", true); } catch (e) {}
   aiMaybeTurn();
 }
 function aiRestoreTempSeat() {
@@ -1423,7 +1424,6 @@ function aiRestoreTempSeat() {
   }
   if (typeof seatTypes !== "undefined" && seatTypes) seatTypes[i] = "human";
   updateTurnUI(); updatePlayersPanel();
-  showTurnBanner("托管结束，交还给你");
 }
 function aiAdvance() {
   aiThreatCache = null; // AI 回合结束清缓存（玩家侧读实时值）
@@ -2737,14 +2737,14 @@ function updatePlayersPanel() {
     let relIcon = "";
     const huIdx = pickOrder.findIndex(function(x) { return x.type === "human"; });
     const huF = huIdx >= 0 ? picks[huIdx] : null;
-    if (huF && huF !== f && !eliminated[huF]) relIcon = " <span title=\"与 " + displayName(huF) + " 的关系\">" + relEmoji(f, huF) + "</span>";
+    if (huF && huF !== f && !eliminated[huF]) relIcon = " <span>" + relEmoji(f, huF) + "</span>";
     const canGive = gamePhase === "build" && f !== (picks[currentPlayerIdx] || "") && !eliminated[f] && !!(pickOrder[currentPlayerIdx] && pickOrder[currentPlayerIdx].type === "human"); // 死人不能收支援；仅人类玩家自己的回合可操作国库（电脑回合禁止，防替 AI 花钱）
-    h += "<div class='pl" + (i === currentPlayerIdx ? " cur" : "") + "'><span class='f'><span class='fname' style='color:" + factionTextColor(f) + "'>" + displayName(f) + "</span> " + ps.name.replace(/：/g, "·") + (ps.treasury < 0 ? " <span style='color:#e08a6a;font-size:12px' title='负债：全军战力 -1'>负债</span>" : "") + " <button class='give-btn' onclick='giveMoney(\"" + f + "\")'" + (canGive ? "" : " disabled") + ">支援</button> " + (f !== (picks[currentPlayerIdx] || "") ? relEmoji(picks[currentPlayerIdx] || "", f) + (isPeace(picks[currentPlayerIdx] || "", f) ? "🏳️" : "🔥") : "") + "</span><br>" +
+    h += "<div class='pl" + (i === currentPlayerIdx ? " cur" : "") + "'><span class='f'><span class='fname' style='color:" + factionTextColor(f) + "'>" + displayName(f) + "</span> " + ps.name.replace(/：/g, "·") + (ps.treasury < 0 ? " <span style='color:#e08a6a;font-size:12px'>负债</span>" : "") + " <button class='give-btn' onclick='giveMoney(\"" + f + "\")'" + (canGive ? "" : " disabled") + ">支援</button> " + (f !== (picks[currentPlayerIdx] || "") ? relEmoji(picks[currentPlayerIdx] || "", f) + (isPeace(picks[currentPlayerIdx] || "", f) ? "🏳️" : "🔥") : "") + "</span><br>" +
          "<span class='st'>" +
-         "<span class='sti' title='军力'><i class='mil'>⚔</i>" + power + "</span>" +
-         "<span class='sti' title='国库'><i>$</i>" + t2.toFixed(2) + "</span>" +
-         "<span class='sti in' title='收入'><i>→$</i>" + inc.toFixed(2) + "</span>" +
-         (tr[f].in !== 0 || tr[f].out !== 0 || up !== 0 ? "<span class='sti out' title='支出'><i>$→</i>" + (tr[f].out + up).toFixed(2) + "</span><span class='sti net " + (net < 0 ? "neg" : "pos") + "' title='净收入'><i>⇆$</i>" + net.toFixed(2) + "</span>" : "") +
+         "<span class='sti'><i class='mil'>⚔</i>" + power + "</span>" +
+         "<span class='sti'><i>$</i>" + t2.toFixed(2) + "</span>" +
+         "<span class='sti in'><i>→$</i>" + inc.toFixed(2) + "</span>" +
+         (tr[f].in !== 0 || tr[f].out !== 0 || up !== 0 ? "<span class='sti out'><i>$→</i>" + (tr[f].out + up).toFixed(2) + "</span><span class='sti net " + (net < 0 ? "neg" : "pos") + "'><i>⇆$</i>" + net.toFixed(2) + "</span>" : "") +
          "</span>" + debuffLines(f, power) + "</div>";
   }
   el.innerHTML = h;
@@ -5169,7 +5169,7 @@ function goalLines(f, isMe) {
     num += goalDone(f, g) ? 1 : 0; den += 1;
     return goalText(g, f) + (goalDone(f, g) ? " ✓" : "");
   });
-  return "<div class='goal'><div class='goal-head'><span class='goal-t'>🎯 " + cap + " " + num + "/" + den + "</span><button class='goal-next' onclick='goalNext()' title='查看其他玩家的胜利条件'>▶</button></div>" + parts.join("<br>") + "</div>";
+  return "<div class='goal'><div class='goal-head'><span class='goal-t'>🎯 " + cap + " " + num + "/" + den + "</span><button class='goal-next' onclick='goalNext()'>▶</button></div>" + parts.join("<br>") + "</div>";
 }
 function checkGoals() {
   if (gameOverShown) return;
@@ -8833,7 +8833,7 @@ function buildPickBar(){
   var bar=document.getElementById("pick-bar");bar.innerHTML="";
   ORDER.forEach(function(n,i){var d=C[n];var x=document.createElement("span");x.className="bd";x.id="bd"+i;x.innerHTML=d.icon+" "+n;x.onclick=function(){if(avail.has(n)){pickIdx=i;showPick()}};if(!avail.has(n))x.classList.add("tk");bar.appendChild(x)})
   // 🎲 随机文明：独立占位选项，进入游戏才揭晓
-  var r=document.createElement("span");r.className="bd rand";r.id="bdR";r.innerHTML="🎲 随机";r.title="随机选择一个文明，进入游戏才揭晓";
+  var r=document.createElement("span");r.className="bd rand";r.id="bdR";r.innerHTML="🎲 随机";
   r.onclick=function(){pickIdx=-1;showPick()};
   bar.appendChild(r)
 }
@@ -10399,7 +10399,7 @@ function histRelRep(name) {
     <button class="rbtn" onclick="replayPrev()">⏮</button>
     <button class="rbtn" id="replay-play-btn" onclick="replayToggle()">▶</button>
     <button class="rbtn" onclick="replayNext()">⏭</button>
-    <button class="rbtn" id="replay-speed-btn" onclick="replaySpeedClick()" title="播放速度">1×</button>
+    <button class="rbtn" id="replay-speed-btn" onclick="replaySpeedClick()">1×</button>
     <button class="rbtn" onclick="exitReplay()">退出</button>
   </div>
 </div>
