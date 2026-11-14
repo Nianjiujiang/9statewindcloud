@@ -3919,7 +3919,7 @@ function executeJointMove(srcPid, tgtPid, selUids) {
   // 联合调动记录：源地块（兵力）调动至 目标归属 目标地块
   chronicleAdd(displayName(src.owner) + " " + provinceById[srcPid].name + "（" + describeArmyOf({ units: movers }) + "）调动至 " + (oldOwner ? displayName(oldOwner) + " " : "中立 ") + tgt.name); // 调动行总显示当时目标归属（占领由占领行表达）
   // 调动占领（他人/中立空地）：单独一行，与打仗占领一致
-  if (captured || !oldOwner) chronicleAdd(displayName(src.owner) + " 占领 " + tgt.name);
+  if (captured || !oldOwner) chronicleAdd(displayName(src.owner) + " " + provinceById[srcPid].name + "（" + describeArmyOf({ units: movers }) + "）占领 " + (oldOwner ? displayName(oldOwner) + " " : "中立 ") + tgt.name);
   // 等移动动画播完再重建单位/刷新（避免 updateProvLabels 打断动画）；玩家：动画放完再填色；AI 保持原样
   setTimeout(function() {
     octx.clearRect(0, 0, W, H); // 清 overlay 残留（防可达绿框闪烁）
@@ -4216,7 +4216,7 @@ function executeJointAttack(srcPid, tgtPid, selUids) {
   chronicleAdd("损失：" + atkProv.name + "→" + tgt.name + " 攻方 " + lossTxt(atkLoss) + "，守方 " + lossTxt(defLoss)); // 整场战斗双方损失（兵种，独立行）
   // 占领记录（含绿营军收编）放在战斗/损失之后
   if (captured) {
-    chronicleAdd(displayName(src.owner) + " 占领 " + tgt.name + (defOwner && isGreenCamp(src.owner) ? "，收编一队步兵" : ""));
+    chronicleAdd(displayName(src.owner) + " " + atkProv.name + "（" + (lastKiller ? lastKiller.name + "×1" : describeArmyOf({ units: participated.length ? participated : attackers })) + "）占领 " + (defOwner ? displayName(defOwner) + " " : "中立 ") + tgt.name + (defOwner && isGreenCamp(src.owner) ? "，收编一队步兵" : ""));
   }
   const attackerCount = attackers.length;
   const surv = src.units.filter(u => attackers.indexOf(u) >= 0).length;
@@ -5065,6 +5065,19 @@ function chronicleAddText(t) {
     chronicle.push(fCity + " 在 " + pCity + " 建造城市×1（-" + Math.round(cCity * 100) / 100 + " 钱）");
     return;
   }
+  // 支援合并：同势力连续支援同一目标 → 累加金额（5 5 5 → 15）
+  const mSup = t.match(/^(.+?) 支援 (.+?) ([\d.]+) 钱$/);
+  if (mSup) {
+    const fSup = mSup[1], tSup = mSup[2], aSup = parseFloat(mSup[3]);
+    if (chronicleMerge && chronicle.length > 0 && chronicleMerge.type === "support" && chronicleMerge.faction === fSup && chronicleMerge.to === tSup) {
+      chronicleMerge.amount += aSup;
+      chronicle[chronicle.length - 1] = fSup + " 支援 " + tSup + " " + Math.round(chronicleMerge.amount * 100) / 100 + " 钱";
+      return;
+    }
+    chronicleMerge = { type: "support", faction: fSup, to: tSup, amount: aSup };
+    chronicle.push(fSup + " 支援 " + tSup + " " + Math.round(aSup * 100) / 100 + " 钱");
+    return;
+  }
   chronicleMerge = null; // 其他行动打断合并
   chronicle.push(t);
 }
@@ -5098,7 +5111,10 @@ function chronicleAddMove(faction, srcProv, unitName, tgtOwnerText, tgtName, cap
   chronicleMerge.units[unitName] = 1;
   chronicle.push(buildMoveText(chronicleMerge));
   // 占领行：调动到无主（中立）或他人地块 → 单独一行「XX 占领 XX」（与联合调动/战斗占领一致）
-  if (captured) chronicleAdd(faction + " 占领 " + tgtName);
+  if (captured) chronicleAdd(faction + " " + srcProv + "（" + unitsTextOf(chronicleMerge.units) + "）占领 " + (capOwner ? capOwner + " " : "中立 ") + tgtName);
+}
+function unitsTextOf(map) {
+  return Object.keys(map).map(function(n) { return n + "×" + map[n]; }).join("、");
 }
 function buildMoveText(m) {
   const u = Object.keys(m.units).map(function(n) { return n + "×" + m.units[n]; }).join("、");
@@ -5620,6 +5636,15 @@ function parseReplayText(raw) {
       _atkPending.atkLoss = specCount(m[1]);
       _atkPending.defLoss = specCount(m[2]);
       _atkPending.lossHandled = true; // 已精确减员：序列内后续战斗行不再按单场规则重复减员
+      pushFrame(); continue;
+    }
+    // 新格式占领行：势力 源地块（兵力）占领 [目标归属] 目标地块
+    m = line.match(/^(\S+) (\S+)（(.+?)）占领 (?:\S+ )?(\S+?)(，.*)?$/);
+    if (m) {
+      applyFallbackDamage();
+      const pidNew = _provId(m[4]);
+      if (pidNew !== null) { own(pidNew, m[1]); transferLastKiller(pidNew); }
+      clearAttack();
       pushFrame(); continue;
     }
     // 绿营军：占领 X，收编一队步兵（攻占玩家地块赠步兵）
@@ -8581,7 +8606,7 @@ function resolveBattle(b, atkUnit, defUnit, src, dst, d1, d2, atkTotal, defTotal
     // 不立即同步坐标：顺势占领动画从源地块走过去（视觉）
     if (dst.building === "行宫") { dst.building = ""; bldgDestroyFx(b.tgt); } // 行宫被占摧毁 + 特效
     captured = true;
-    chronicleAdd(displayName(src.owner) + " 占领 " + b.tgt.name + (defOwnerB && isGreenCamp(src.owner) ? "，收编一队步兵" : ""));
+    chronicleAdd(displayName(src.owner) + " " + ((atkHome && atkHome.prov) ? atkHome.prov.name : src.name) + "（" + atkUnit.name + "×1）占领 " + (defOwnerB ? displayName(defOwnerB) + " " : "中立 ") + b.tgt.name + (defOwnerB && isGreenCamp(src.owner) ? "，收编一队步兵" : ""));
   }
   highlightProvince(b.tgt);
   // 等死亡动画播完再重绘 + 占领动画
@@ -10680,6 +10705,23 @@ function historyCommit(label, alwaysNarrative) {
       if (s && s.indexOf("――") !== 0) { label = s; break; }
     }
     if (label == null) label = "操作";
+  }
+  // 同一条行动被写两次（chronicleAdd 的文字行 + recordReplayFrame 的兜底帧）：
+  // 标签相同、同回合同阶段 → 合并差量，不再追加新条目。
+  const lastE = histEntries.length ? histEntries[histEntries.length - 1] : null;
+  if (lastE && lastE.label === String(label == null ? "" : label).slice(0, 300) && lastE.turn === currentTurn && lastE.phase === gamePhase) {
+    if (d) {
+      const base = lastE.delta || {};
+      for (const bk of ["p", "f", "g"]) {
+        if (!d[bk]) continue;
+        base[bk] = base[bk] || {};
+        for (const kk in d[bk]) base[bk][kk] = d[bk][kk];
+      }
+      if (d.c) base.c = d.c;
+      lastE.delta = base;
+      histSnap = cur;
+    }
+    return;
   }
   histEntries.push({
     turn: currentTurn,
