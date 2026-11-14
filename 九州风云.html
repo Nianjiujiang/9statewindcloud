@@ -534,7 +534,7 @@ body.ap-picking canvas { cursor: crosshair; }
 <div class="set-row" id="row-capLv"><label>初始首都等级</label><div class="num"><button onclick="adjSetting('capLv',-1)">−</button><span class="val" id="nv-capLv">1</span><button onclick="adjSetting('capLv',1)">+</button></div></div>
 <div class="set-row" id="row-income"><label>收入倍率</label><div class="num"><button onclick="adjSetting('income',-1)">−</button><span class="val" id="nv-income">1</span><button onclick="adjSetting('income',1)">+</button></div></div>
 <div class="set-row"><label>行动时间</label><div class="num"><button onclick="adjSetting('turnTime',-1)">−</button><span class="val" id="nv-turnTime">无</span><button onclick="adjSetting('turnTime',1)">+</button></div></div>
-<div class="set-row"><label>飞地惩罚</label><div class="win-opts">
+<div class="set-row"><label>补给惩罚</label><div class="win-opts">
   <label class="sw-item"><span class="switch"><input type="checkbox" name="enclave" checked><span class="slider"></span></span></label>
 </div></div>
 <div class="set-row"><label>地形惩罚</label><div class="win-opts">
@@ -1246,7 +1246,7 @@ buffHook("unit.power", function (c) {
   return typeof p.delta === "number" ? p.delta : 0;
 });
 
-// 免补给惩罚（顺·流动作战：不受飞地补给惩罚）
+// 免补给惩罚（闯军·流动作战：不受补给惩罚）
 buffHook("battle.enclaveImmune", function (c) {
   if ((c.buff && (c.buff.stage || "base") === "base") && !buffBaseOnly(c.faction)) return false;
   return { ok: true };
@@ -4616,7 +4616,7 @@ function applyLoadedSave(d) {
     container.querySelectorAll(".prov-label").forEach(function(l) { l.remove(); });
     createLabels(); updateLabelPositions();
     startMoney = d.startMoney || 10; startCapLv = d.startCapLv || 1; incomeMult = d.incomeMult || 1; boardMode = !!d.boardMode; turnTimeLimit = d.turnTimeLimit || 0; // 0=无限时（|| 防止 undefined；0 是合法值不能被 || 吃掉）
-    enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false; // 读档恢复地形/飞地惩罚开关（此前被注释吞掉）
+    enclaveOn = d.enclaveOn !== false; terrainOn = d.terrainOn !== false; // 读档恢复地形/补给惩罚开关（此前被注释吞掉）
     mapView = d.mapView || "political";
     if (mapView === "economic") mapView = "income"; // 旧存档经济视图 → 收入视图（已拆分）
     gameOverShown = !!d.gameOverShown;
@@ -6151,7 +6151,7 @@ function hasXingGong() {
   }
   return false;
 }
-// 飞地判定：从首都沿己方地块 BFS，不可达则视为飞地（驻军战力-1）
+// 补给判定：从首都沿己方地块 BFS，不可达则视为断补给（驻军战力-1）
 function isEnclave(provId, faction) {
   if (!faction) return false;
   // 起点：首都 + 行宫（陪都，相连地块不受补给惩罚）
@@ -8436,11 +8436,12 @@ function calcBattleMods(atkUnit, defUnit, src, dst, tgt, atkProv) {
   // 开拓：对中立单位交战时战力 +1
   if (hasKeyword(atkUnit, "开拓") && !dst.owner) R.atk.list.push({ t: "开拓", v: 1 });
   if (hasKeyword(atkUnit, "劫掠")) R.atk.list.push({ t: "劫掠", v: 1 }); // 游牧/定难节度骑兵：进攻时战力 +1
-  // 飞地补给
-  const atkNoEncl = (typeof buffAny === "function") && buffAny(src.owner, "battle.enclaveImmune", {});
-  const defNoEncl = dst.owner && (typeof buffAny === "function") && buffAny(dst.owner, "battle.enclaveImmune", {});
-  if (enclaveOn && !atkNoEncl && isEnclave(atkProv.id, src.owner)) R.atk.list.push({ t: "飞地", v: -1 });
-  if (enclaveOn && !defNoEncl && dst.owner && isEnclave(tgt.id, dst.owner)) R.def.list.push({ t: "飞地", v: -1 });
+  // 补给惩罚：与首都不连通的地块，驻军战力 -1
+  // 注意：enclaveImmune 钩子返回的是 {ok:true} 而不是裸 true，buffAny 只认 === true 会漏判，这里用 buffFirst 判空。
+  const atkNoEncl = (typeof buffFirst === "function") && !!buffFirst(src.owner, "battle.enclaveImmune", {}, null);
+  const defNoEncl = dst.owner && (typeof buffFirst === "function") && !!buffFirst(dst.owner, "battle.enclaveImmune", {}, null);
+  if (enclaveOn && !atkNoEncl && isEnclave(atkProv.id, src.owner)) R.atk.list.push({ t: "补给-1", v: -1 });
+  if (enclaveOn && !defNoEncl && dst.owner && isEnclave(tgt.id, dst.owner)) R.def.list.push({ t: "补给-1", v: -1 });
   // 天子守国门：明首都 +1（仅首都为江南/燕云/广东时）
   // buff: ming_capital_battle —— +1 与 targets 判定都走 params；
   // 缺条目时退回旧硬编码（isMingBuffCap + 1），行为不变。
@@ -10154,7 +10155,7 @@ function aiRulesDigest() {
     "【城市】白地建城 20 钱，升级 20 钱/级，最高 4 级；游牧势力不能升级城市（可从白地建 1 级城市）。",
     "【发展度】0–10；提升 1 点价格 = 地形价格 ×（当前发展度+1）。地形价格：农田 4、平原 5、旱地 6、森林/草原/高原 7、丘陵 8、丛林/山地 9、沙漠 10；秦（山地）与汉（沙漠）−4，晋全部 −2。",
     "【行动阶段】非骑兵单位每回合可调动1次或进攻1次；骑兵/有奔袭、机动等词条的单位可行动2次（不可连续战斗两次）。调动或进攻必须从一个地块到相邻陆地地块。",
-    "【地形惩罚】攻方进攻森林/丛林/丘陵/高原-1；山地/沙漠-2；跨河/跨海-1；飞地（与首都不连通）驻军战力-1。",
+    "【地形惩罚】攻方进攻森林/丛林/丘陵/高原-1；山地/沙漠-2；跨河/跨海-1；补给-1（与首都不连通的地块）驻军战力-1。",
     "【战斗】每个单位依次与守方一个单位单挑：双方各掷1d6，加上兵种/词条/地形修正，最终点数限制在1~10；高点获胜。步兵优先攻击步兵→骑兵→远程，骑兵优先攻击骑兵→步兵→远程，远程可自由选择目标。",
     "【收入】每回合开始结算：单地块收入=发展度×2×(城市等级+1)，另加建筑/势力加成；国库上限3000。",
     "【胜利】默认占领全部城市；沙盒模式可在设置中切换胜利条件（占领全部地块/城市等）。AI 对局只使用沙盒模式。"
